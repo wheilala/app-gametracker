@@ -14,13 +14,17 @@ python -m http.server 8080
 
 Then open `http://localhost:8080`.
 
-## GitHub Pages
+## Release Workflow
 
-This app can publish directly from the repository root on `main`.
+Use `develop` for ordinary app changes. Merge `develop` into `main` when a change is ready for beta testers.
 
-Expected URL after Pages is enabled:
+Pushing to `main` runs `.github/workflows/publish-pages.yml`, which copies the static app into the `app-gametracker/` folder of `wheilala/wheilala.github.io`.
+
+Published URL:
 
 `https://wheilala.github.io/app-gametracker/`
+
+The workflow requires a repository secret named `PAGES_PUBLISH_TOKEN` with permission to push to `wheilala/wheilala.github.io`.
 
 ## Notes
 
