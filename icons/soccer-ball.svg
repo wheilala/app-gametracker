@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Soccer ball">
+  <rect width="512" height="512" rx="96" fill="#265b44"/>
+  <circle cx="256" cy="256" r="184" fill="#f7fbf8"/>
+  <g fill="#17211f">
+    <polygon points="256 138 314 180 292 248 220 248 198 180"/>
+    <polygon points="141 218 190 252 172 314 112 314 92 256"/>
+    <polygon points="371 218 420 256 400 314 340 314 322 252"/>
+    <polygon points="207 341 256 306 305 341 286 400 226 400"/>
+    <polygon points="256 70 296 104 256 128 216 104"/>
+  </g>
+  <g fill="none" stroke="#17211f" stroke-width="18" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M198 180l-58 38M314 180l57 38M220 248l-30 4M292 248l30 4M172 314l35 27M340 314l-35 27M256 306v-58M216 104l-18 76M296 104l18 76"/>
+    <circle cx="256" cy="256" r="184"/>
+  </g>
+</svg>
