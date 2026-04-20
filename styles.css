@@ -72,6 +72,10 @@ button {
   text-transform: uppercase;
 }
 
+.eyebrow:empty {
+  display: none;
+}
+
 h1,
 h2 {
   margin: 0;

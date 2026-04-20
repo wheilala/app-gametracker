@@ -628,7 +628,9 @@ function renderPlayers() {
     ? roster.filter((player) => activeField.includes(player.id))
     : getPresentRoster();
 
-  selectablePlayers.forEach((player) => {
+  [...selectablePlayers]
+    .sort((left, right) => left.name.localeCompare(right.name))
+    .forEach((player) => {
     const row = document.createElement("article");
     row.className = "player-row";
     row.innerHTML = `
@@ -1334,8 +1336,8 @@ function renderGoalQualityStep() {
 
 function showRoster() {
   state.selectedPlayer = null;
-  panelTitle.textContent = "Who did you notice?";
-  modeEyebrow.textContent = "Select player";
+  panelTitle.textContent = "Observations";
+  modeEyebrow.textContent = "";
   cancelObservation.classList.add("hidden");
   observationPanel.classList.add("hidden");
   playerGrid.classList.remove("hidden");
