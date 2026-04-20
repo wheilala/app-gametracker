@@ -14,6 +14,14 @@ python -m http.server 8080
 
 Then open `http://localhost:8080`.
 
+## GitHub Pages
+
+This app can publish directly from the repository root on `main`.
+
+Expected URL after Pages is enabled:
+
+`https://wheilala.github.io/app-gametracker/`
+
 ## Notes
 
 - Game data is saved in browser `localStorage`.
