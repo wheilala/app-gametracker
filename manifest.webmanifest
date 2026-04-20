@@ -9,9 +9,9 @@
   "theme_color": "#265b44",
   "icons": [
     {
-      "src": "icons/soccer-ball.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
+      "src": "soccer-fav.png",
+      "sizes": "512x512",
+      "type": "image/png",
       "purpose": "any maskable"
     }
   ]
