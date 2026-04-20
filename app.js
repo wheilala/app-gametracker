@@ -1,4 +1,4 @@
-const roster = [
+const defaultRoster = [
   { id: "alex", name: "Alex" },
   { id: "ben", name: "Ben" },
   { id: "caleb", name: "Caleb" },
@@ -15,13 +15,14 @@ const roster = [
   { id: "owen", name: "Owen" }
 ];
 
-const defaultStartingLineup = roster.slice(0, 11).map((player) => player.id);
+let roster = [...defaultRoster];
+const defaultStartingLineup = defaultRoster.slice(0, 11).map((player) => player.id);
 const gameFormats = {
   "7v7": 7,
   "9v9": 9,
   "11v11": 11
 };
-const defaultPresence = roster.reduce((presence, player) => {
+const defaultPresence = defaultRoster.reduce((presence, player) => {
   presence[player.id] = true;
   return presence;
 }, {});
@@ -107,6 +108,7 @@ const state = {
   halftimeStartedAt: 0,
   gameFormat: "11v11",
   trackPlayingTime: false,
+  roster: [...defaultRoster],
   presence: { ...defaultPresence },
   startingLineup: [...defaultStartingLineup],
   initialOnField: [],
@@ -146,6 +148,8 @@ const subsMadeButton = document.querySelector("#subsMadeButton");
 const rosterSheet = document.querySelector("#rosterSheet");
 const closeRoster = document.querySelector("#closeRoster");
 const rosterSummary = document.querySelector("#rosterSummary");
+const addPlayerForm = document.querySelector("#addPlayerForm");
+const newPlayerName = document.querySelector("#newPlayerName");
 const rosterList = document.querySelector("#rosterList");
 const subSheet = document.querySelector("#subSheet");
 const closeSubs = document.querySelector("#closeSubs");
@@ -199,6 +203,7 @@ function saveGame() {
     halftimeStartedAt: state.halftimeStartedAt,
     gameFormat: state.gameFormat,
     trackPlayingTime: state.trackPlayingTime,
+    roster: state.roster,
     presence: state.presence,
     startingLineup: state.startingLineup,
     initialOnField: state.initialOnField,
@@ -227,6 +232,8 @@ function loadGame() {
     state.halftimeStartedAt = Number(parsed.halftimeStartedAt) || 0;
     state.gameFormat = gameFormats[parsed.gameFormat] ? parsed.gameFormat : "11v11";
     state.trackPlayingTime = Boolean(parsed.trackPlayingTime);
+    state.roster = normalizeRoster(parsed.roster);
+    roster = state.roster;
     state.presence = normalizePresence(parsed.presence);
     state.startingLineup = normalizePlayerIds(parsed.startingLineup, defaultStartingLineup);
     state.initialOnField = normalizePlayerIds(parsed.initialOnField, []);
@@ -238,6 +245,47 @@ function loadGame() {
   } catch {
     window.localStorage.removeItem(STORAGE_KEY);
   }
+}
+
+function makePlayerId(name) {
+  const base = name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "") || "player";
+  let id = base;
+  let counter = 2;
+
+  while (roster.some((player) => player.id === id)) {
+    id = `${base}-${counter}`;
+    counter += 1;
+  }
+
+  return id;
+}
+
+function normalizeRoster(savedRoster) {
+  if (!Array.isArray(savedRoster)) {
+    return [...defaultRoster];
+  }
+
+  const seen = new Set();
+  const cleaned = savedRoster
+    .map((player) => ({
+      id: String(player.id || "").trim(),
+      name: String(player.name || "").trim()
+    }))
+    .filter((player) => player.name)
+    .map((player) => {
+      let id = player.id || player.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+      if (!id || seen.has(id)) {
+        id = `${id || "player"}-${seen.size + 1}`;
+      }
+      seen.add(id);
+      return { id, name: player.name };
+    });
+
+  return cleaned.length ? cleaned : [...defaultRoster];
 }
 
 function normalizePresence(savedPresence) {
@@ -650,7 +698,7 @@ function renderRosterSheet() {
 
     row.innerHTML = `
       <div>
-        <div class="stat-name">${player.name}</div>
+        <input class="roster-name-input" data-action="rename" data-player-id="${player.id}" value="${player.name}" aria-label="Player name">
         <div class="goal-detail">${state.trackPlayingTime ? (state.onField.includes(player.id) ? "On field" : "Bench / not in game") : "Available for observations"}</div>
       </div>
       <div class="roster-toggles">
@@ -659,6 +707,9 @@ function renderRosterSheet() {
         </button>
         <button class="toggle-pill ${starter ? "active" : ""} ${state.trackPlayingTime ? "" : "hidden"}" data-action="starter" data-player-id="${player.id}" type="button">
           Start
+        </button>
+        <button class="toggle-pill danger-toggle" data-action="remove" data-player-id="${player.id}" type="button">
+          Remove
         </button>
       </div>
     `;
@@ -701,6 +752,66 @@ function toggleStarter(playerId) {
 
   saveGame();
   renderRosterSheet();
+}
+
+function addRosterPlayer(name) {
+  const playerName = name.trim();
+  if (!playerName) {
+    return;
+  }
+
+  const player = { id: makePlayerId(playerName), name: playerName };
+  roster.push(player);
+  state.roster = roster;
+  state.presence[player.id] = true;
+  saveGame();
+  renderRosterSheet();
+  showRoster();
+}
+
+function renameRosterPlayer(playerId, name) {
+  const player = roster.find((item) => item.id === playerId);
+  const playerName = name.trim();
+  if (!player || !playerName) {
+    renderRosterSheet();
+    return;
+  }
+
+  player.name = playerName;
+  state.roster = roster;
+  saveGame();
+  renderRosterSheet();
+  showRoster();
+}
+
+function removeRosterPlayer(playerId) {
+  const player = roster.find((item) => item.id === playerId);
+  if (!player) {
+    return;
+  }
+
+  const confirmed = window.confirm(`Remove ${player.name} from the roster? Existing observations by name will remain in the log.`);
+  if (!confirmed) {
+    return;
+  }
+
+  roster = roster.filter((item) => item.id !== playerId);
+  state.roster = roster;
+  delete state.presence[playerId];
+  state.startingLineup = state.startingLineup.filter((id) => id !== playerId);
+  state.initialOnField = state.initialOnField.filter((id) => id !== playerId);
+  state.onField = state.onField.filter((id) => id !== playerId);
+  state.stagedSubs = state.stagedSubs.filter((pair) => pair.outId !== playerId && pair.inId !== playerId);
+  state.subEvents = state.subEvents
+    .map((event) => ({
+      ...event,
+      subs: event.subs.filter((pair) => pair.outId !== playerId && pair.inId !== playerId)
+    }))
+    .filter((event) => event.subs.length);
+  saveGame();
+  renderRosterSheet();
+  renderSubStrip();
+  showRoster();
 }
 
 function setPresence(playerId, present) {
@@ -1670,7 +1781,25 @@ rosterList.addEventListener("click", (event) => {
     togglePresence(button.dataset.playerId);
   } else if (button.dataset.action === "starter") {
     toggleStarter(button.dataset.playerId);
+  } else if (button.dataset.action === "remove") {
+    removeRosterPlayer(button.dataset.playerId);
   }
+});
+
+rosterList.addEventListener("change", (event) => {
+  const input = event.target.closest(".roster-name-input");
+  if (!input) {
+    return;
+  }
+
+  renameRosterPlayer(input.dataset.playerId, input.value);
+});
+
+addPlayerForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  addRosterPlayer(newPlayerName.value);
+  newPlayerName.value = "";
+  newPlayerName.focus();
 });
 
 subStagedList.addEventListener("click", (event) => {
