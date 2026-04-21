@@ -22,8 +22,7 @@
           <div class="account-status-line" id="accountStatusLine">Local only</div>
         </div>
         <div class="header-actions">
-          <button class="quiet-button" id="authButton" type="button">Account</button>
-          <button class="quiet-button" id="teamsButton" type="button">Teams</button>
+          <button class="quiet-button" id="settingsButton" type="button">Settings</button>
           <button class="quiet-button hidden" id="installButton" type="button">Install</button>
           <button class="quiet-button" id="newGameButton" type="button">New Game</button>
           <button class="quiet-button" id="gameLogButton" type="button">Logs</button>
@@ -127,6 +126,26 @@
       </div>
     </aside>
 
+    <aside class="settings-sheet hidden" id="settingsSheet" aria-hidden="true">
+      <div class="settings-card" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Settings</p>
+            <h2 id="settingsTitle">Account and defaults</h2>
+          </div>
+          <button class="icon-button" id="closeSettings" type="button" aria-label="Close settings">
+            <span aria-hidden="true">x</span>
+          </button>
+        </div>
+        <div class="auth-status" id="settingsStatus"></div>
+        <div class="settings-actions">
+          <button class="secondary-action wide-action" id="openAccountFromSettings" type="button">Account</button>
+          <button class="secondary-action wide-action" id="openTeamsFromSettings" type="button">Teams</button>
+          <button class="secondary-action wide-action" id="openObservationsFromSettings" type="button">Observations</button>
+        </div>
+      </div>
+    </aside>
+
     <aside class="auth-sheet hidden" id="authSheet" aria-hidden="true">
       <div class="auth-card" role="dialog" aria-modal="true" aria-labelledby="authTitle">
         <div class="panel-heading">
@@ -171,8 +190,8 @@
           <button class="primary-action" id="saveTeamButton" type="submit">Save team</button>
         </form>
         <div class="teams-list" id="teamsList"></div>
-        <button class="secondary-action wide-action" id="openTeamRoster" type="button">Edit selected roster</button>
-        <button class="text-button wide-action" id="openObservationsFromTeams" type="button">Manage observations</button>
+        <button class="secondary-action wide-action" id="openTeamRoster" type="button">Manage selected roster</button>
+        <div class="team-roster-preview" id="teamRosterPreview"></div>
       </div>
     </aside>
 
@@ -188,19 +207,27 @@
           </button>
         </div>
         <div class="auth-status" id="observationsStatus"></div>
-        <form class="observation-edit-form" id="observationForm">
-          <select id="observationTarget" aria-label="Observation target">
-            <option value="player">Player</option>
-            <option value="team">Team</option>
-          </select>
-          <select id="observationCategory" aria-label="Observation category">
-            <option value="positive">Positive</option>
-            <option value="negative">Negative</option>
-          </select>
-          <input id="observationLabel" type="text" autocomplete="off" placeholder="Observation label" aria-label="Observation label">
-          <button class="primary-action" id="saveObservationChoice" type="submit">Add observation</button>
-        </form>
-        <div class="observation-choice-list" id="observationChoiceList"></div>
+        <div class="observation-manager-layout">
+          <section class="observation-editor-section">
+            <p class="eyebrow">Add or edit</p>
+            <form class="observation-edit-form" id="observationForm">
+              <select id="observationTarget" aria-label="Observation target">
+                <option value="player">Player</option>
+                <option value="team">Team</option>
+              </select>
+              <select id="observationCategory" aria-label="Observation category">
+                <option value="positive">Positive</option>
+                <option value="negative">Negative</option>
+              </select>
+              <input id="observationLabel" type="text" autocomplete="off" placeholder="Observation label" aria-label="Observation label">
+              <button class="primary-action" id="saveObservationChoice" type="submit">Add observation</button>
+            </form>
+          </section>
+          <section class="observation-list-section">
+            <p class="eyebrow">Current choices</p>
+            <div class="observation-choice-list" id="observationChoiceList"></div>
+          </section>
+        </div>
       </div>
     </aside>
 
@@ -226,14 +253,13 @@
           </section>
           <section>
             <h3>Game Workflow</h3>
-            <p>Use New Game to set opponent, type, format, attendance, and starters. Current-game actions live by the clock for goals, subs, roster, and tally.</p>
+            <p>Use New Game to choose the team and mark anyone absent. Current-game actions live by the clock for goals, roster, and tally.</p>
           </section>
           <section>
             <h3>Logs</h3>
             <p>Logs save locally as you track. When signed in, game logs sync to Supabase and can be copied, loaded, or deleted from Logs.</p>
           </section>
         </div>
-        <button class="secondary-action wide-action" id="openObservationsFromHelp" type="button">Manage Observations</button>
       </div>
     </aside>
 

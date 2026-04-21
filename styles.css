@@ -493,6 +493,7 @@ h2 {
 .observations-sheet,
 .roster-sheet,
 .reset-sheet,
+.settings-sheet,
 .setup-sheet,
 .sub-sheet,
 .teams-sheet,
@@ -513,6 +514,7 @@ h2 {
 .observations-card,
 .roster-card,
 .reset-card,
+.settings-card,
 .setup-card,
 .sub-card,
 .teams-card,
@@ -538,6 +540,7 @@ h2 {
 .games-card,
 .help-card,
 .observations-card,
+.settings-card,
 .setup-card,
 .sub-card,
 .teams-card {
@@ -552,6 +555,26 @@ h2 {
   grid-template-columns: repeat(auto-fit, minmax(116px, 1fr));
   gap: 8px;
   width: 100%;
+}
+
+.setup-progress {
+  display: block;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 900;
+}
+
+.simple-ready-panel {
+  align-content: center;
+  grid-template-columns: 1fr;
+  min-height: 160px;
+}
+
+.ready-line {
+  color: var(--ink);
+  text-align: center;
+  font-size: clamp(1.2rem, 6vw, 1.6rem);
+  font-weight: 950;
 }
 
 .ready-pill {
@@ -697,6 +720,15 @@ h2 {
   gap: 8px;
 }
 
+.settings-actions,
+.observation-manager-layout,
+.observation-editor-section,
+.observation-list-section,
+.team-roster-preview {
+  display: grid;
+  gap: 10px;
+}
+
 .team-edit-form {
   grid-template-columns: minmax(0, 1.3fr) minmax(0, 0.9fr) auto;
 }
@@ -737,6 +769,25 @@ h2 {
 .team-manage-row.selected {
   border-color: #a8d7b5;
   background: var(--positive-soft);
+}
+
+.team-roster-preview {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fbf9;
+  padding: 10px;
+}
+
+.roster-preview-heading {
+  margin-bottom: 4px;
+  color: var(--ink);
+  font-size: 0.9rem;
+  font-weight: 950;
+}
+
+.observation-editor-section,
+.observation-list-section {
+  min-height: 0;
 }
 
 .observation-choice-list {
@@ -1146,6 +1197,7 @@ button:focus-visible {
 
   .goal-card,
   .games-card,
+  .settings-card,
   .sub-card,
   .teams-card {
     min-height: min(90vh, 680px);

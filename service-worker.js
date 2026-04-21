@@ -1,4 +1,4 @@
-const CACHE_NAME = "game-tracker-v4";
+const CACHE_NAME = "game-tracker-v5";
 const APP_ASSETS = [
   "./",
   "./index.html",
