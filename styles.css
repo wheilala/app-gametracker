@@ -328,6 +328,28 @@ h2 {
   padding: 14px;
 }
 
+.no-game-context {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fbf9;
+  padding: 14px;
+}
+
+.no-game-title {
+  margin: 0;
+  color: var(--ink);
+  font-size: clamp(1.08rem, 5vw, 1.4rem);
+  font-weight: 950;
+}
+
+.no-game-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+}
+
 .player-grid {
   display: grid;
   grid-template-columns: 1fr;
@@ -797,6 +819,12 @@ h2 {
   overflow: auto;
 }
 
+.observation-filter-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
 .observation-choice-row {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -806,6 +834,37 @@ h2 {
   border-radius: 8px;
   background: #fff;
   padding: 10px;
+}
+
+.observation-choice-row.positive {
+  border-color: #a8d7b5;
+  background: var(--positive-soft);
+}
+
+.observation-choice-row.negative {
+  border-color: #e6d18f;
+  background: var(--negative-soft);
+}
+
+.observation-category {
+  display: inline-flex;
+  min-height: 20px;
+  align-items: center;
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.observation-category.positive {
+  background: #d7f0dd;
+  color: var(--positive);
+}
+
+.observation-category.negative {
+  background: #f5df98;
+  color: var(--negative);
 }
 
 .help-content {
@@ -1162,6 +1221,11 @@ h2 {
 button:focus-visible {
   outline: 3px solid var(--focus);
   outline-offset: 2px;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 @media (min-width: 640px) {

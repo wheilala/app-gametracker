@@ -158,6 +158,7 @@ const accountState = {
   profile: null,
   teams: [],
   selectedTeamId: null,
+  observationFilterTarget: "player",
   playersByTeam: new Map(),
   games: [],
   observationChoices: [],
@@ -179,6 +180,12 @@ const undoStrip = document.querySelector("#undoStrip");
 const undoContext = document.querySelector("#undoContext");
 const undoLast = document.querySelector("#undoLast");
 const playerGrid = document.querySelector("#playerGrid");
+const noGameContext = document.querySelector("#noGameContext");
+const noGameTitle = document.querySelector("#noGameTitle");
+const noGameText = document.querySelector("#noGameText");
+const startNewGameFromPrompt = document.querySelector("#startNewGameFromPrompt");
+const loadLastGameFromPrompt = document.querySelector("#loadLastGameFromPrompt");
+const openTeamsFromPrompt = document.querySelector("#openTeamsFromPrompt");
 const observationPanel = document.querySelector("#observationPanel");
 const observationGroups = document.querySelector("#observationGroups");
 const selectedPlayerName = document.querySelector("#selectedPlayerName");
@@ -241,6 +248,7 @@ const observationCategory = document.querySelector("#observationCategory");
 const observationLabel = document.querySelector("#observationLabel");
 const saveObservationChoiceButton = document.querySelector("#saveObservationChoice");
 const observationChoiceList = document.querySelector("#observationChoiceList");
+const observationFilterTabs = document.querySelector("#observationFilterTabs");
 const helpSheet = document.querySelector("#helpSheet");
 const closeHelp = document.querySelector("#closeHelp");
 const subSheet = document.querySelector("#subSheet");
@@ -318,6 +326,61 @@ function setAccountMessage(message) {
 
 function getSelectedTeam() {
   return accountState.teams.find((team) => team.id === accountState.selectedTeamId) || null;
+}
+
+function hasGameContext() {
+  return Boolean(state.currentGameId && state.currentGameCreatedAt);
+}
+
+function hasTeamAndRosterReady() {
+  if (!accountState.user) {
+    return roster.length > 0;
+  }
+
+  const selectedTeam = getSelectedTeam();
+  return Boolean(selectedTeam && selectedTeamPlayerCount() > 0);
+}
+
+function isSameDayLocal(leftIso, rightIso = new Date().toISOString()) {
+  if (!leftIso) {
+    return false;
+  }
+
+  const left = new Date(leftIso);
+  const right = new Date(rightIso);
+  return left.getFullYear() === right.getFullYear()
+    && left.getMonth() === right.getMonth()
+    && left.getDate() === right.getDate();
+}
+
+function getMostRecentSavedGame() {
+  const games = mergeGameArchives();
+  return games.length ? games[0] : null;
+}
+
+function enforceGameSetupIfNeeded() {
+  if (!accountState.user) {
+    return false;
+  }
+
+  if (hasTeamAndRosterReady()) {
+    return false;
+  }
+
+  openTeamsSheet();
+  return true;
+}
+
+function updateInContextUI() {
+  const inContext = hasGameContext();
+  const canPlay = inContext;
+  rosterButton.disabled = !canPlay;
+  goalButton.disabled = !canPlay;
+  tallyButton.disabled = !canPlay;
+  clockToggle.disabled = !canPlay;
+  pauseClockButton.disabled = !canPlay;
+  halftimeButton.disabled = !canPlay;
+  finalWhistleButton.disabled = !canPlay;
 }
 
 function applyObservationChoices(choices) {
@@ -532,6 +595,10 @@ function scheduleGameArchiveSave() {
 }
 
 async function persistCurrentGame() {
+  if (!hasGameContext()) {
+    return null;
+  }
+
   const snapshot = upsertLocalGameArchive(getCurrentGamePayload());
 
   if (isServerMode()) {
@@ -1400,6 +1467,11 @@ function renderUndo() {
 }
 
 function startClock() {
+  if (!hasGameContext()) {
+    openSetupSheet();
+    return;
+  }
+
   if (state.period === "final") {
     return;
   }
@@ -1475,7 +1547,6 @@ function startFreshGameIdentity() {
   state.currentGameUpdatedAt = null;
   state.currentGameSavedAt = null;
   state.serverGameId = null;
-  ensureCurrentGameIdentity();
 }
 
 function clearLogOnly() {
@@ -1735,13 +1806,25 @@ function renderAccountStatus() {
 }
 
 function renderCurrentGameMeta() {
+  if (!hasGameContext()) {
+    currentGameMeta.textContent = "No game in context";
+    updateInContextUI();
+    return;
+  }
+
   const selectedTeam = getSelectedTeam();
   const available = getPresentRoster().length;
   currentGameMeta.textContent = `${selectedTeam ? selectedTeam.name : "Local roster"} | ${available} available`;
+  updateInContextUI();
 }
 
 function renderOnboardingNudge() {
   if (!accountState.user || accountState.onboardingDismissed) {
+    onboardingStrip.classList.add("hidden");
+    return;
+  }
+
+  if (mergeGameArchives().length > 0) {
     onboardingStrip.classList.add("hidden");
     return;
   }
@@ -1781,6 +1864,10 @@ function renderOnboardingNudge() {
 
 function shouldShowOnboardingFlow() {
   if (!accountState.user || accountState.onboardingDismissed) {
+    return false;
+  }
+
+  if (mergeGameArchives().length > 0) {
     return false;
   }
 
@@ -1958,35 +2045,48 @@ function renderObservationsSheet() {
     return;
   }
 
+  const selectedTarget = accountState.observationFilterTarget === "team" ? "team" : "player";
+  observationFilterTabs.querySelectorAll("[data-observation-filter]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.observationFilter === selectedTarget);
+  });
+
   if (!accountState.user) {
     observationsStatus.textContent = "Sign in to curate observation choices. Local mode uses the defaults.";
     observationForm.classList.add("hidden");
-    observationChoiceList.innerHTML = "";
-    return;
+  } else {
+    observationForm.classList.remove("hidden");
+    observationsStatus.textContent = "User-wide choices apply to all teams.";
   }
 
-  observationForm.classList.remove("hidden");
-  observationsStatus.textContent = "User-wide choices apply to all teams.";
   observationChoiceList.innerHTML = "";
 
-  const activeChoices = accountState.observationChoices
-    .filter((choice) => choice.active !== false)
-    .sort((left, right) => left.target.localeCompare(right.target) || left.category.localeCompare(right.category) || (left.sort_order || 0) - (right.sort_order || 0));
+  const activeChoices = isServerMode()
+    ? accountState.observationChoices
+      .filter((choice) => choice.active !== false)
+      .sort((left, right) => left.category.localeCompare(right.category) || (left.sort_order || 0) - (right.sort_order || 0))
+    : [
+      ...observations.positive.map((label, sort_order) => ({ id: `local-player-positive-${sort_order}`, target: "player", category: "positive", label, sort_order })),
+      ...observations.negative.map((label, sort_order) => ({ id: `local-player-negative-${sort_order}`, target: "player", category: "negative", label, sort_order })),
+      ...teamObservations.positive.map((label, sort_order) => ({ id: `local-team-positive-${sort_order}`, target: "team", category: "positive", label, sort_order })),
+      ...teamObservations.negative.map((label, sort_order) => ({ id: `local-team-negative-${sort_order}`, target: "team", category: "negative", label, sort_order }))
+    ];
+  const scopedChoices = activeChoices.filter((choice) => choice.target === selectedTarget);
 
-  if (!activeChoices.length) {
-    observationChoiceList.innerHTML = '<div class="goal-detail">No choices yet. Defaults will be restored after sign-in sync.</div>';
+  if (!scopedChoices.length) {
+    observationChoiceList.innerHTML = '<div class="goal-detail">No choices in this group yet.</div>';
     return;
   }
 
-  activeChoices.forEach((choice) => {
+  scopedChoices.forEach((choice) => {
     const row = document.createElement("article");
-    row.className = "observation-choice-row";
+    row.className = `observation-choice-row ${choice.category}`;
+    const canEdit = Boolean(accountState.user);
     row.innerHTML = `
       <div>
         <div class="stat-name">${escapeHtml(choice.label)}</div>
-        <div class="goal-detail">${escapeHtml(choice.target)} | ${escapeHtml(choice.category)}</div>
+        <div class="goal-detail"><span class="observation-category ${escapeHtml(choice.category)}">${escapeHtml(choice.category)}</span></div>
       </div>
-      <div class="roster-toggles">
+      <div class="roster-toggles ${canEdit ? "" : "hidden"}">
         <button class="toggle-pill" data-observation-action="up" data-choice-id="${escapeHtml(choice.id)}" type="button">Up</button>
         <button class="toggle-pill" data-observation-action="down" data-choice-id="${escapeHtml(choice.id)}" type="button">Down</button>
         <button class="toggle-pill" data-observation-action="edit" data-choice-id="${escapeHtml(choice.id)}" type="button">Edit</button>
@@ -2002,6 +2102,7 @@ function resetObservationForm(choice = null) {
   observationTarget.value = choice ? choice.target : "player";
   observationCategory.value = choice ? choice.category : "positive";
   observationLabel.value = choice ? choice.label : "";
+  accountState.observationFilterTarget = choice ? choice.target : accountState.observationFilterTarget;
   saveObservationChoiceButton.textContent = choice ? "Update observation" : "Add observation";
 }
 
@@ -2320,6 +2421,7 @@ function loadArchivedGameIntoState(game) {
   saveGame();
   closeGamesSheet();
   renderClock();
+  renderCurrentGameMeta();
   renderSubStrip();
   showRoster();
 }
@@ -2340,6 +2442,8 @@ async function deleteArchivedGameRecord(game) {
   if (state.currentGameId === game.id) {
     startFreshGameIdentity();
     saveGame();
+    renderCurrentGameMeta();
+    showRoster();
   }
   selectedArchivedGameId = null;
   await refreshGameLogs();
@@ -2750,6 +2854,11 @@ function commitStagedSubs() {
 }
 
 function openSetupSheet() {
+  if (enforceGameSetupIfNeeded()) {
+    setAccountMessage("Complete team and roster setup before starting a game.");
+    return;
+  }
+
   setupStep = 0;
   opponentName.value = "";
   matchType.value = "League";
@@ -2913,6 +3022,7 @@ function finishSetup() {
   const opponent = opponentName.value.trim();
   const type = matchTypes.includes(matchType.value) ? matchType.value : "League";
   clearGameForNewSetup();
+  ensureCurrentGameIdentity();
   state.presence = presence;
   state.startingLineup = startingLineup;
   state.gameFormat = gameFormat;
@@ -3000,6 +3110,11 @@ function renderGoalOptions(items, onPick, selectedValues = []) {
 }
 
 function openGoalFlow() {
+  if (!hasGameContext()) {
+    openSetupSheet();
+    return;
+  }
+
   state.goalDraft = {
     team: null,
     scorer: null,
@@ -3095,9 +3210,63 @@ function showRoster() {
   modeEyebrow.textContent = "";
   cancelObservation.classList.add("hidden");
   observationPanel.classList.add("hidden");
+  renderGameContextPrompt();
+  if (!hasGameContext()) {
+    renderUndo();
+    return;
+  }
+  noGameContext.classList.add("hidden");
   playerGrid.classList.remove("hidden");
   renderPlayers();
   renderUndo();
+}
+
+function renderGameContextPrompt() {
+  if (hasGameContext()) {
+    noGameContext.classList.add("hidden");
+    playerGrid.classList.remove("hidden");
+    return;
+  }
+
+  const lastGame = getMostRecentSavedGame();
+  const hasSetup = hasTeamAndRosterReady();
+  playerGrid.classList.add("hidden");
+  noGameContext.classList.remove("hidden");
+
+  if (!hasSetup && accountState.user) {
+    noGameTitle.textContent = "Set up team and roster first";
+    noGameText.textContent = "Add at least one team and one active player before starting a game.";
+    openTeamsFromPrompt.classList.remove("hidden");
+    loadLastGameFromPrompt.classList.add("hidden");
+    return;
+  }
+
+  openTeamsFromPrompt.classList.add("hidden");
+
+  if (!lastGame) {
+    noGameTitle.textContent = "No game in context";
+    noGameText.textContent = "Start a new game to begin logging observations.";
+    loadLastGameFromPrompt.classList.add("hidden");
+    return;
+  }
+
+  selectedArchivedGameId = lastGame.id;
+  const isToday = isSameDayLocal(lastGame.createdAt || lastGame.updatedAt);
+  noGameTitle.textContent = isToday ? "Resume or start fresh" : "Last game was from an earlier day";
+  noGameText.textContent = isToday
+    ? "Load the latest game or create a new one."
+    : "Load the last started game or create a new game.";
+  loadLastGameFromPrompt.classList.remove("hidden");
+}
+
+function loadLatestGameIntoContext() {
+  const game = getMostRecentSavedGame();
+  if (!game) {
+    openSetupSheet();
+    return;
+  }
+
+  loadArchivedGameIntoState(game);
 }
 
 function showObservations(player, category = null, target = "player") {
@@ -3464,6 +3633,11 @@ async function promptInstallApp() {
 }
 
 function openTally() {
+  if (!hasGameContext()) {
+    openSetupSheet();
+    return;
+  }
+
   renderTally();
   tallySheet.classList.remove("hidden");
   tallySheet.setAttribute("aria-hidden", "false");
@@ -3490,7 +3664,14 @@ installButton.addEventListener("click", promptInstallApp);
 settingsButton.addEventListener("click", openSettingsSheet);
 helpButton.addEventListener("click", openHelpSheet);
 newGameButton.addEventListener("click", openSetupSheet);
-rosterButton.addEventListener("click", openRosterSheet);
+rosterButton.addEventListener("click", () => {
+  if (!hasGameContext()) {
+    openSetupSheet();
+    return;
+  }
+
+  openRosterSheet();
+});
 closeRoster.addEventListener("click", closeRosterSheet);
 closeSettings.addEventListener("click", closeSettingsSheet);
 closeAuth.addEventListener("click", closeAuthSheet);
@@ -3538,6 +3719,9 @@ onboardingAction.addEventListener("click", openTeamsSheet);
 onboardingLater.addEventListener("click", () => {
   dismissOnboarding().catch(() => {});
 });
+startNewGameFromPrompt.addEventListener("click", openSetupSheet);
+loadLastGameFromPrompt.addEventListener("click", loadLatestGameIntoContext);
+openTeamsFromPrompt.addEventListener("click", openTeamsSheet);
 
 openAccountFromSettings.addEventListener("click", () => {
   closeSettingsSheet();
@@ -3605,6 +3789,16 @@ observationChoiceList.addEventListener("click", (event) => {
   }
 
   handleObservationChoiceAction(button);
+});
+
+observationFilterTabs.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-observation-filter]");
+  if (!button) {
+    return;
+  }
+
+  accountState.observationFilterTarget = button.dataset.observationFilter;
+  renderObservationsSheet();
 });
 
 opponentName.addEventListener("change", syncGameMetaFromInputs);
@@ -3866,14 +4060,12 @@ window.addEventListener("beforeunload", saveGame);
 
 setupInstallPrompt();
 loadGame();
-ensureCurrentGameIdentity();
 renderObservationButtons();
 renderAccountStatus();
 renderCurrentGameMeta();
 showRoster();
 renderSubStrip();
 renderClock();
-persistCurrentGame().catch(() => {});
 initializeAccount();
 
 if (state.running || state.halftimeRunning) {

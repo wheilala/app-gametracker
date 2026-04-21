@@ -97,6 +97,16 @@
           <button class="text-button hidden" id="cancelObservation" type="button">Roster</button>
         </div>
 
+        <div class="no-game-context hidden" id="noGameContext">
+          <h3 class="no-game-title" id="noGameTitle">No game in context</h3>
+          <p class="goal-detail" id="noGameText">Start a new game to begin logging observations.</p>
+          <div class="no-game-actions">
+            <button class="primary-action" id="startNewGameFromPrompt" type="button">New Game</button>
+            <button class="secondary-action hidden" id="loadLastGameFromPrompt" type="button">Load Last Game</button>
+            <button class="secondary-action hidden" id="openTeamsFromPrompt" type="button">Set Up Team</button>
+          </div>
+        </div>
+
         <div class="player-grid" id="playerGrid" aria-label="Roster"></div>
 
         <div class="observation-panel hidden" id="observationPanel">
@@ -225,6 +235,10 @@
           </section>
           <section class="observation-list-section">
             <p class="eyebrow">Current choices</p>
+            <div class="observation-filter-tabs" id="observationFilterTabs">
+              <button class="toggle-pill active" data-observation-filter="player" type="button">Player</button>
+              <button class="toggle-pill" data-observation-filter="team" type="button">Team</button>
+            </div>
             <div class="observation-choice-list" id="observationChoiceList"></div>
           </section>
         </div>
