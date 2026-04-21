@@ -21,6 +21,8 @@
           <h1>Game Tracker</h1>
         </div>
         <div class="header-actions">
+          <button class="quiet-button" id="authButton" type="button">Account</button>
+          <button class="quiet-button" id="teamsButton" type="button">Teams</button>
           <button class="quiet-button hidden" id="installButton" type="button">Install</button>
           <button class="quiet-button" id="newGameButton" type="button">New Game</button>
           <button class="quiet-button" id="rosterButton" type="button">Roster</button>
@@ -31,6 +33,19 @@
           </button>
         </div>
       </header>
+
+      <section class="account-strip" id="accountStrip" aria-live="polite"></section>
+
+      <section class="onboarding-strip hidden" id="onboardingStrip" aria-live="polite">
+        <div>
+          <p class="eyebrow">Setup nudge</p>
+          <div class="undo-context" id="onboardingText"></div>
+        </div>
+        <div class="onboarding-actions">
+          <button class="undo-action" id="onboardingAction" type="button">Open Teams</button>
+          <button class="undo-action" id="onboardingLater" type="button">Later</button>
+        </div>
+      </section>
 
       <section class="game-clock" aria-label="Game clock">
         <div>
@@ -101,6 +116,54 @@
           <button class="secondary-action" type="submit">Add</button>
         </form>
         <div class="roster-list" id="rosterList"></div>
+      </div>
+    </aside>
+
+    <aside class="auth-sheet hidden" id="authSheet" aria-hidden="true">
+      <div class="auth-card" role="dialog" aria-modal="true" aria-labelledby="authTitle">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Account</p>
+            <h2 id="authTitle">Save teams online</h2>
+          </div>
+          <button class="icon-button" id="closeAuth" type="button" aria-label="Close account">
+            <span aria-hidden="true">x</span>
+          </button>
+        </div>
+        <div class="auth-status" id="authStatus"></div>
+        <form class="auth-form" id="emailSignInForm">
+          <input id="authEmail" type="email" autocomplete="email" placeholder="coach@example.com" aria-label="Email address">
+          <button class="primary-action" type="submit">Email link</button>
+        </form>
+        <button class="secondary-action wide-action hidden" id="googleSignIn" type="button">Continue with Google</button>
+        <button class="text-button wide-action hidden" id="signOutButton" type="button">Sign out</button>
+      </div>
+    </aside>
+
+    <aside class="teams-sheet hidden" id="teamsSheet" aria-hidden="true">
+      <div class="teams-card" role="dialog" aria-modal="true" aria-labelledby="teamsTitle">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Teams</p>
+            <h2 id="teamsTitle">Manage teams</h2>
+          </div>
+          <button class="icon-button" id="closeTeams" type="button" aria-label="Close teams">
+            <span aria-hidden="true">x</span>
+          </button>
+        </div>
+        <div class="auth-status" id="teamsStatus"></div>
+        <form class="team-edit-form" id="teamForm">
+          <input id="teamName" type="text" autocomplete="off" placeholder="Team name" aria-label="Team name">
+          <input id="teamAge" type="text" autocomplete="off" placeholder="Age group" aria-label="Age group">
+          <select id="teamFormat" aria-label="Team game format">
+            <option value="7v7">7v7</option>
+            <option value="9v9">9v9</option>
+            <option value="11v11" selected>11v11</option>
+          </select>
+          <button class="primary-action" id="saveTeamButton" type="submit">Save team</button>
+        </form>
+        <div class="teams-list" id="teamsList"></div>
+        <button class="secondary-action wide-action" id="openTeamRoster" type="button">Edit selected roster</button>
       </div>
     </aside>
 
@@ -194,6 +257,8 @@
       </div>
     </aside>
 
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="supabase-config.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

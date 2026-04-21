@@ -38,7 +38,7 @@ jobs:
           set -euo pipefail
           rm -rf pages/app-gametracker
           mkdir -p pages/app-gametracker
-          cp index.html app.js styles.css manifest.webmanifest service-worker.js soccer-fav.png pages/app-gametracker/
+          cp index.html app.js styles.css manifest.webmanifest service-worker.js supabase-config.js soccer-fav.png pages/app-gametracker/
 
       - name: Commit and push published app
         if: env.PAGES_PUBLISH_TOKEN != ''

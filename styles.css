@@ -124,6 +124,8 @@ h2 {
 
 .game-clock,
 .sub-strip,
+.account-strip,
+.onboarding-strip,
 .undo-strip,
 .entry-panel {
   border: 1px solid var(--line);
@@ -228,6 +230,31 @@ h2 {
   gap: 10px;
   border-color: #b9d6c4;
   padding: 10px 12px;
+}
+
+.account-strip,
+.onboarding-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+}
+
+.account-actions,
+.onboarding-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.account-message {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 750;
+  line-height: 1.2;
 }
 
 .undo-context {
@@ -431,10 +458,12 @@ h2 {
 }
 
 .goal-sheet,
+.auth-sheet,
 .roster-sheet,
 .reset-sheet,
 .setup-sheet,
 .sub-sheet,
+.teams-sheet,
 .tally-sheet {
   position: fixed;
   inset: 0;
@@ -446,10 +475,12 @@ h2 {
 }
 
 .goal-card,
+.auth-card,
 .roster-card,
 .reset-card,
 .setup-card,
 .sub-card,
+.teams-card,
 .tally-card {
   display: flex;
   width: min(100%, 740px);
@@ -470,7 +501,8 @@ h2 {
 
 .roster-card,
 .setup-card,
-.sub-card {
+.sub-card,
+.teams-card {
   min-height: min(78vh, 650px);
   min-height: min(78dvh, 650px);
 }
@@ -589,6 +621,9 @@ h2 {
 }
 
 .roster-edit-form input,
+.auth-form input,
+.team-edit-form input,
+.team-edit-form select,
 .roster-name-input {
   min-width: 0;
   min-height: 40px;
@@ -599,6 +634,55 @@ h2 {
   padding: 8px 10px;
   font: inherit;
   font-weight: 850;
+}
+
+.auth-status {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fbf9;
+  color: var(--muted);
+  padding: 10px;
+  font-size: 0.9rem;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.auth-form,
+.team-edit-form {
+  display: grid;
+  gap: 8px;
+}
+
+.team-edit-form {
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 0.9fr) auto;
+}
+
+.team-edit-form .primary-action {
+  grid-column: 1 / -1;
+  width: 100%;
+}
+
+.teams-list {
+  display: grid;
+  gap: 8px;
+  min-height: 0;
+  overflow: auto;
+}
+
+.team-manage-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 10px;
+}
+
+.team-manage-row.selected {
+  border-color: #a8d7b5;
+  background: var(--positive-soft);
 }
 
 .roster-name-input {
@@ -898,10 +982,19 @@ button:focus-visible {
   }
 
   .goal-card,
-  .sub-card {
+  .sub-card,
+  .teams-card {
     min-height: min(90vh, 680px);
     min-height: min(90dvh, 680px);
     padding: 10px;
+  }
+
+  .team-edit-form {
+    grid-template-columns: 1fr;
+  }
+
+  .team-manage-row {
+    grid-template-columns: 1fr;
   }
 
   .goal-options {

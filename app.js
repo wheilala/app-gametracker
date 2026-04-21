@@ -94,6 +94,10 @@ const goalQualityTags = [
 ];
 
 const STORAGE_KEY = "rtsc-game-tracker-v1";
+const SUPABASE_CONFIG = window.GAME_TRACKER_SUPABASE || {};
+const supabaseClient = window.supabase && SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey
+  ? window.supabase.createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.anonKey)
+  : null;
 
 const state = {
   selectedPlayer: null,
@@ -119,6 +123,18 @@ const state = {
   goals: []
 };
 
+const accountState = {
+  session: null,
+  user: null,
+  profile: null,
+  teams: [],
+  selectedTeamId: null,
+  playersByTeam: new Map(),
+  loading: false,
+  message: supabaseClient ? "" : "Local only: add Supabase config to save teams online.",
+  onboardingDismissed: false
+};
+
 const clockStatus = document.querySelector("#clockStatus");
 const clockReadout = document.querySelector("#clockReadout");
 const halftimeReadout = document.querySelector("#halftimeReadout");
@@ -140,6 +156,13 @@ const cancelObservation = document.querySelector("#cancelObservation");
 const tallyButton = document.querySelector("#tallyButton");
 const installButton = document.querySelector("#installButton");
 const newGameButton = document.querySelector("#newGameButton");
+const authButton = document.querySelector("#authButton");
+const teamsButton = document.querySelector("#teamsButton");
+const accountStrip = document.querySelector("#accountStrip");
+const onboardingStrip = document.querySelector("#onboardingStrip");
+const onboardingText = document.querySelector("#onboardingText");
+const onboardingAction = document.querySelector("#onboardingAction");
+const onboardingLater = document.querySelector("#onboardingLater");
 const rosterButton = document.querySelector("#rosterButton");
 const subsButton = document.querySelector("#subsButton");
 const subStrip = document.querySelector("#subStrip");
@@ -151,6 +174,23 @@ const rosterSummary = document.querySelector("#rosterSummary");
 const addPlayerForm = document.querySelector("#addPlayerForm");
 const newPlayerName = document.querySelector("#newPlayerName");
 const rosterList = document.querySelector("#rosterList");
+const authSheet = document.querySelector("#authSheet");
+const closeAuth = document.querySelector("#closeAuth");
+const authStatus = document.querySelector("#authStatus");
+const emailSignInForm = document.querySelector("#emailSignInForm");
+const authEmail = document.querySelector("#authEmail");
+const googleSignIn = document.querySelector("#googleSignIn");
+const signOutButton = document.querySelector("#signOutButton");
+const teamsSheet = document.querySelector("#teamsSheet");
+const closeTeams = document.querySelector("#closeTeams");
+const teamsStatus = document.querySelector("#teamsStatus");
+const teamForm = document.querySelector("#teamForm");
+const teamName = document.querySelector("#teamName");
+const teamAge = document.querySelector("#teamAge");
+const teamFormat = document.querySelector("#teamFormat");
+const saveTeamButton = document.querySelector("#saveTeamButton");
+const teamsList = document.querySelector("#teamsList");
+const openTeamRoster = document.querySelector("#openTeamRoster");
 const subSheet = document.querySelector("#subSheet");
 const closeSubs = document.querySelector("#closeSubs");
 const subStepLabel = document.querySelector("#subStepLabel");
@@ -191,6 +231,72 @@ const setupStart = document.querySelector("#setupStart");
 let ticker = null;
 let setupStep = 0;
 let deferredInstallPrompt = null;
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function isServerMode() {
+  return Boolean(supabaseClient && accountState.user);
+}
+
+function setAccountMessage(message) {
+  accountState.message = message || "";
+  renderAccountStatus();
+}
+
+function getSelectedTeam() {
+  return accountState.teams.find((team) => team.id === accountState.selectedTeamId) || null;
+}
+
+function mapServerPlayer(player) {
+  return {
+    id: `server-${player.id}`,
+    serverId: player.id,
+    name: player.name,
+    active: player.active !== false
+  };
+}
+
+function getServerIdFromPlayerId(playerId) {
+  const player = roster.find((item) => item.id === playerId);
+  return player && player.serverId ? player.serverId : null;
+}
+
+function applyTeamRoster(team, players) {
+  if (!team) {
+    roster = [...defaultRoster];
+    state.roster = roster;
+    state.gameFormat = "11v11";
+    state.presence = normalizePresence({});
+    state.startingLineup = defaultStartingLineup.filter((id) => roster.some((player) => player.id === id));
+    return;
+  }
+
+  const activePlayers = [...players]
+    .filter((player) => player.active !== false)
+    .sort((left, right) => (left.sort_order || 0) - (right.sort_order || 0) || left.name.localeCompare(right.name))
+    .map(mapServerPlayer);
+  roster = activePlayers.length ? activePlayers : [];
+  state.roster = roster;
+  state.gameFormat = gameFormats[team.game_format] ? team.game_format : state.gameFormat;
+  state.presence = normalizePresence({});
+  state.startingLineup = roster.slice(0, gameFormats[state.gameFormat] || 11).map((player) => player.id);
+  state.initialOnField = [];
+  state.onField = [];
+  state.stagedSubs = [];
+  saveGame();
+}
+
+function selectedTeamPlayerCount() {
+  const players = accountState.playersByTeam.get(accountState.selectedTeamId) || [];
+  return players.filter((player) => player.active !== false).length;
+}
 
 function saveGame() {
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify({
@@ -301,6 +407,342 @@ function normalizePlayerIds(savedIds, fallback) {
   const ids = Array.isArray(savedIds) ? savedIds : fallback;
   const validIds = ids.filter((id) => roster.some((player) => player.id === id));
   return [...new Set(validIds)];
+}
+
+async function getSession() {
+  if (!supabaseClient) {
+    return null;
+  }
+
+  const { data, error } = await supabaseClient.auth.getSession();
+  if (error) {
+    throw error;
+  }
+
+  return data.session || null;
+}
+
+async function ensureProfile(user) {
+  if (!supabaseClient || !user) {
+    return null;
+  }
+
+  const email = user.email || "";
+  const { data, error } = await supabaseClient
+    .from("profiles")
+    .upsert({ id: user.id, email }, { onConflict: "id" })
+    .select("*")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+}
+
+async function signInWithEmail(email) {
+  if (!supabaseClient) {
+    setAccountMessage("Add Supabase config before signing in.");
+    return;
+  }
+
+  const { error } = await supabaseClient.auth.signInWithOtp({
+    email,
+    options: {
+      emailRedirectTo: window.location.href.split("#")[0]
+    }
+  });
+
+  if (error) {
+    throw error;
+  }
+
+  setAccountMessage("Check your email for a sign-in link.");
+}
+
+async function signInWithGoogle() {
+  if (!supabaseClient) {
+    setAccountMessage("Add Supabase config before signing in.");
+    return;
+  }
+
+  const { error } = await supabaseClient.auth.signInWithOAuth({
+    provider: "google",
+    options: {
+      redirectTo: window.location.href.split("#")[0]
+    }
+  });
+
+  if (error) {
+    throw error;
+  }
+}
+
+async function signOut() {
+  if (!supabaseClient) {
+    return;
+  }
+
+  const { error } = await supabaseClient.auth.signOut();
+  if (error) {
+    throw error;
+  }
+}
+
+async function loadTeams() {
+  if (!isServerMode()) {
+    return [];
+  }
+
+  const { data, error } = await supabaseClient
+    .from("teams")
+    .select("*")
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    throw error;
+  }
+
+  return data || [];
+}
+
+async function loadPlayers(teamId) {
+  if (!isServerMode() || !teamId) {
+    return [];
+  }
+
+  const { data, error } = await supabaseClient
+    .from("players")
+    .select("*")
+    .eq("team_id", teamId)
+    .eq("active", true)
+    .order("sort_order", { ascending: true })
+    .order("name", { ascending: true });
+
+  if (error) {
+    throw error;
+  }
+
+  accountState.playersByTeam.set(teamId, data || []);
+  return data || [];
+}
+
+async function createTeam(team) {
+  if (!isServerMode()) {
+    throw new Error("Sign in before creating teams.");
+  }
+
+  const { data, error } = await supabaseClient
+    .from("teams")
+    .insert({
+      user_id: accountState.user.id,
+      name: team.name,
+      age_group: team.age_group || null,
+      game_format: team.game_format || "11v11"
+    })
+    .select("*")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+}
+
+async function updateTeam(team) {
+  if (!isServerMode()) {
+    throw new Error("Sign in before editing teams.");
+  }
+
+  const { data, error } = await supabaseClient
+    .from("teams")
+    .update({
+      name: team.name,
+      age_group: team.age_group || null,
+      game_format: team.game_format || "11v11"
+    })
+    .eq("id", team.id)
+    .select("*")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+}
+
+async function deleteTeam(teamId) {
+  if (!isServerMode()) {
+    throw new Error("Sign in before deleting teams.");
+  }
+
+  const { error } = await supabaseClient
+    .from("teams")
+    .delete()
+    .eq("id", teamId);
+
+  if (error) {
+    throw error;
+  }
+}
+
+async function savePlayer(player) {
+  if (!isServerMode() || !accountState.selectedTeamId) {
+    return null;
+  }
+
+  const payload = {
+    team_id: accountState.selectedTeamId,
+    name: player.name,
+    sort_order: player.sort_order ?? roster.length,
+    active: player.active !== false
+  };
+
+  if (player.serverId) {
+    const { data, error } = await supabaseClient
+      .from("players")
+      .update(payload)
+      .eq("id", player.serverId)
+      .select("*")
+      .single();
+    if (error) {
+      throw error;
+    }
+    return data;
+  }
+
+  const { data, error } = await supabaseClient
+    .from("players")
+    .insert(payload)
+    .select("*")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+}
+
+async function deletePlayer(playerId) {
+  const serverId = getServerIdFromPlayerId(playerId);
+  if (!isServerMode() || !serverId) {
+    return;
+  }
+
+  const { error } = await supabaseClient
+    .from("players")
+    .update({ active: false })
+    .eq("id", serverId);
+
+  if (error) {
+    throw error;
+  }
+}
+
+async function setSelectedTeam(teamId) {
+  accountState.selectedTeamId = teamId || null;
+
+  if (isServerMode() && accountState.profile) {
+    const { data, error } = await supabaseClient
+      .from("profiles")
+      .update({ selected_team_id: accountState.selectedTeamId })
+      .eq("id", accountState.user.id)
+      .select("*")
+      .single();
+
+    if (error) {
+      throw error;
+    }
+
+    accountState.profile = data;
+  }
+
+  const team = getSelectedTeam();
+  const players = team ? await loadPlayers(team.id) : [];
+  applyTeamRoster(team, players);
+  renderAccountStatus();
+  renderTeamsSheet();
+  renderRosterSheet();
+  renderSubStrip();
+  showRoster();
+}
+
+async function refreshAccountData() {
+  if (!isServerMode()) {
+    return;
+  }
+
+  accountState.loading = true;
+  renderAccountStatus();
+
+  try {
+    accountState.profile = await ensureProfile(accountState.user);
+    accountState.onboardingDismissed = Boolean(accountState.profile.onboarding_dismissed);
+    accountState.teams = await loadTeams();
+    await Promise.all(accountState.teams.map((team) => loadPlayers(team.id)));
+    const preferredTeamId = accountState.profile.selected_team_id;
+    const selected = accountState.teams.find((team) => team.id === preferredTeamId) || accountState.teams[0] || null;
+    accountState.selectedTeamId = selected ? selected.id : null;
+
+    if (selected) {
+      const players = accountState.playersByTeam.get(selected.id) || [];
+      applyTeamRoster(selected, players);
+    }
+
+    accountState.message = "";
+  } catch (error) {
+    accountState.message = error.message || "Could not load account data.";
+  } finally {
+    accountState.loading = false;
+    renderAccountStatus();
+    renderTeamsSheet();
+    renderRosterSheet();
+    showRoster();
+  }
+}
+
+async function initializeAccount() {
+  if (!supabaseClient) {
+    renderAccountStatus();
+    return;
+  }
+
+  try {
+    const session = await getSession();
+    accountState.session = session;
+    accountState.user = session ? session.user : null;
+    await refreshAccountData();
+  } catch (error) {
+    accountState.message = error.message || "Could not initialize account.";
+    renderAccountStatus();
+  }
+
+  supabaseClient.auth.onAuthStateChange(async (_event, session) => {
+    accountState.session = session;
+    accountState.user = session ? session.user : null;
+    accountState.profile = null;
+    accountState.teams = [];
+    accountState.playersByTeam.clear();
+    accountState.selectedTeamId = null;
+
+    if (accountState.user) {
+      await refreshAccountData();
+    } else {
+      roster = [...defaultRoster];
+      state.roster = roster;
+      state.presence = normalizePresence({});
+      state.startingLineup = defaultStartingLineup.filter((id) => roster.some((player) => player.id === id));
+      accountState.message = supabaseClient ? "Signed out. Using local roster." : accountState.message;
+      saveGame();
+      renderAccountStatus();
+      renderTeamsSheet();
+      showRoster();
+    }
+  });
 }
 
 function isValidSubPair(pair) {
@@ -593,6 +1035,8 @@ function clearGameForNewSetup() {
   closeTallySheet();
   closeGoalFlow();
   closeSubSheet();
+  closeTeamsSheet();
+  closeAuthSheet();
   closeRosterSheet();
   closeResetSheet();
   renderClock();
@@ -633,13 +1077,14 @@ function renderPlayers() {
     .forEach((player) => {
     const row = document.createElement("article");
     row.className = "player-row";
+    const safeName = escapeHtml(player.name);
     row.innerHTML = `
       <div class="player-row-info">
-        <span class="player-name">${player.name} <span class="player-count-inline">(${playerEntryCount(player.name)})</span></span>
+        <span class="player-name">${safeName} <span class="player-count-inline">(${playerEntryCount(player.name)})</span></span>
       </div>
       <div class="player-row-actions">
-        <button class="quick-observation negative" data-player="${player.name}" data-category="negative" type="button" aria-label="Negative observation for ${player.name}">-</button>
-        <button class="quick-observation positive" data-player="${player.name}" data-category="positive" type="button" aria-label="Positive observation for ${player.name}">+</button>
+        <button class="quick-observation negative" data-player="${safeName}" data-category="negative" type="button" aria-label="Negative observation for ${safeName}">-</button>
+        <button class="quick-observation positive" data-player="${safeName}" data-category="positive" type="button" aria-label="Positive observation for ${safeName}">+</button>
       </div>
     `;
     playerGrid.append(row);
@@ -680,11 +1125,14 @@ function renderRosterSheet() {
   const presentCount = roster.filter((player) => isPresent(player.id)).length;
   const starterCount = state.startingLineup.filter((id) => isPresent(id)).length;
   const onFieldCount = state.onField.length;
+  const selectedTeam = getSelectedTeam();
+  const rosterScope = selectedTeam ? escapeHtml(selectedTeam.name) : "Local roster";
   const lineupPill = state.trackPlayingTime
     ? `<span class="summary-pill">${starterCount}/${gameFormats[state.gameFormat] || 11} starters</span><span class="summary-pill">${onFieldCount} on field</span>`
     : '<span class="summary-pill">Observation-only</span>';
 
   rosterSummary.innerHTML = `
+    <span class="summary-pill">${rosterScope}</span>
     <span class="summary-pill">${presentCount} present</span>
     <span class="summary-pill">${state.gameFormat}</span>
     ${lineupPill}
@@ -697,20 +1145,21 @@ function renderRosterSheet() {
     row.className = "roster-row";
     const present = isPresent(player.id);
     const starter = state.startingLineup.includes(player.id);
+    const safeName = escapeHtml(player.name);
 
     row.innerHTML = `
       <div>
-        <input class="roster-name-input" data-action="rename" data-player-id="${player.id}" value="${player.name}" aria-label="Player name">
+        <input class="roster-name-input" data-action="rename" data-player-id="${escapeHtml(player.id)}" value="${safeName}" aria-label="Player name">
         <div class="goal-detail">${state.trackPlayingTime ? (state.onField.includes(player.id) ? "On field" : "Bench / not in game") : "Available for observations"}</div>
       </div>
       <div class="roster-toggles">
-        <button class="toggle-pill ${present ? "active" : ""}" data-action="presence" data-player-id="${player.id}" type="button">
+        <button class="toggle-pill ${present ? "active" : ""}" data-action="presence" data-player-id="${escapeHtml(player.id)}" type="button">
           ${present ? "Present" : "Absent"}
         </button>
-        <button class="toggle-pill ${starter ? "active" : ""} ${state.trackPlayingTime ? "" : "hidden"}" data-action="starter" data-player-id="${player.id}" type="button">
+        <button class="toggle-pill ${starter ? "active" : ""} ${state.trackPlayingTime ? "" : "hidden"}" data-action="starter" data-player-id="${escapeHtml(player.id)}" type="button">
           Start
         </button>
-        <button class="toggle-pill danger-toggle" data-action="remove" data-player-id="${player.id}" type="button">
+        <button class="toggle-pill danger-toggle" data-action="remove" data-player-id="${escapeHtml(player.id)}" type="button">
           Remove
         </button>
       </div>
@@ -718,6 +1167,234 @@ function renderRosterSheet() {
 
     rosterList.append(row);
   });
+}
+
+function renderAccountStatus() {
+  const selectedTeam = getSelectedTeam();
+  const email = accountState.user ? accountState.user.email : "";
+  const teamText = selectedTeam ? `${selectedTeam.name} (${selectedTeam.game_format})` : "No team selected";
+  const modeText = accountState.user
+    ? `${email || "Signed in"} | ${teamText}`
+    : "Local only | Sign in to save teams";
+  accountStrip.innerHTML = `
+    <div>
+      <p class="eyebrow">${accountState.loading ? "Syncing" : "Account"}</p>
+      <div class="undo-context">${escapeHtml(modeText)}</div>
+      ${accountState.message ? `<div class="account-message">${escapeHtml(accountState.message)}</div>` : ""}
+    </div>
+    <div class="account-actions">
+      <button class="undo-action" id="inlineAuthButton" type="button">${accountState.user ? "Account" : "Sign in"}</button>
+      <button class="undo-action" id="inlineTeamsButton" type="button">Teams</button>
+    </div>
+  `;
+
+  authButton.textContent = accountState.user ? "Account" : "Sign in";
+  teamsButton.classList.toggle("hidden", !accountState.user);
+  renderOnboardingNudge();
+}
+
+function renderOnboardingNudge() {
+  if (!accountState.user || accountState.onboardingDismissed) {
+    onboardingStrip.classList.add("hidden");
+    return;
+  }
+
+  const selectedTeam = getSelectedTeam();
+  let message = "";
+
+  if (!accountState.teams.length) {
+    message = "Create your first team so the roster follows you between devices.";
+  } else if (!selectedTeam) {
+    message = "Choose a team to use as your tracker roster.";
+  } else if (selectedTeamPlayerCount() < 10) {
+    message = `${selectedTeam.name} has ${selectedTeamPlayerCount()} players. Add at least 10 for a well formed roster.`;
+  }
+
+  if (!message) {
+    onboardingStrip.classList.add("hidden");
+    return;
+  }
+
+  onboardingText.textContent = message;
+  onboardingStrip.classList.remove("hidden");
+}
+
+function openAuthSheet() {
+  renderAuthSheet();
+  authSheet.classList.remove("hidden");
+  authSheet.setAttribute("aria-hidden", "false");
+}
+
+function closeAuthSheet() {
+  authSheet.classList.add("hidden");
+  authSheet.setAttribute("aria-hidden", "true");
+}
+
+function renderAuthSheet() {
+  const configured = Boolean(supabaseClient);
+  const signedIn = Boolean(accountState.user);
+  authStatus.textContent = configured
+    ? signedIn
+      ? `Signed in as ${accountState.user.email || "coach"}`
+      : "Email a sign-in link to save teams and rosters online."
+    : "Supabase is not configured yet. The app will keep using local roster data.";
+  emailSignInForm.classList.toggle("hidden", !configured || signedIn);
+  googleSignIn.classList.toggle("hidden", !configured || signedIn || !SUPABASE_CONFIG.enableGoogle);
+  signOutButton.classList.toggle("hidden", !signedIn);
+}
+
+function openTeamsSheet() {
+  renderTeamsSheet();
+  teamsSheet.classList.remove("hidden");
+  teamsSheet.setAttribute("aria-hidden", "false");
+}
+
+function closeTeamsSheet() {
+  teamsSheet.classList.add("hidden");
+  teamsSheet.setAttribute("aria-hidden", "true");
+}
+
+function resetTeamForm(team = null) {
+  teamForm.dataset.teamId = team ? team.id : "";
+  teamName.value = team ? team.name : "";
+  teamAge.value = team && team.age_group ? team.age_group : "";
+  teamFormat.value = team && gameFormats[team.game_format] ? team.game_format : "11v11";
+  saveTeamButton.textContent = team ? "Update team" : "Create team";
+}
+
+function renderTeamsSheet() {
+  if (!teamsList || !teamsStatus) {
+    return;
+  }
+
+  if (!accountState.user) {
+    teamsStatus.textContent = "Sign in to manage server-backed teams.";
+    teamsList.innerHTML = "";
+    teamForm.classList.add("hidden");
+    openTeamRoster.classList.add("hidden");
+    return;
+  }
+
+  teamForm.classList.remove("hidden");
+  openTeamRoster.classList.toggle("hidden", !accountState.selectedTeamId);
+  teamsStatus.textContent = accountState.teams.length
+    ? "Choose the active team or edit team details."
+    : "Create your first team. You can add roster players next.";
+
+  const selectedTeam = getSelectedTeam();
+  if (selectedTeam && !teamForm.dataset.teamId) {
+    resetTeamForm(selectedTeam);
+  }
+
+  teamsList.innerHTML = "";
+
+  accountState.teams.forEach((team) => {
+    const players = accountState.playersByTeam.get(team.id) || [];
+    const activeCount = team.id === accountState.selectedTeamId ? selectedTeamPlayerCount() : players.filter((player) => player.active !== false).length;
+    const row = document.createElement("article");
+    row.className = `team-manage-row ${team.id === accountState.selectedTeamId ? "selected" : ""}`;
+    row.innerHTML = `
+      <div>
+        <div class="stat-name">${escapeHtml(team.name)}</div>
+        <div class="goal-detail">${escapeHtml(team.age_group || "No age group")} | ${escapeHtml(team.game_format)} | ${activeCount} players</div>
+      </div>
+      <div class="roster-toggles">
+        <button class="toggle-pill ${team.id === accountState.selectedTeamId ? "active" : ""}" data-team-action="select" data-team-id="${escapeHtml(team.id)}" type="button">
+          ${team.id === accountState.selectedTeamId ? "Active" : "Use"}
+        </button>
+        <button class="toggle-pill" data-team-action="edit" data-team-id="${escapeHtml(team.id)}" type="button">Edit</button>
+        <button class="toggle-pill danger-toggle" data-team-action="delete" data-team-id="${escapeHtml(team.id)}" type="button">Delete</button>
+      </div>
+    `;
+    teamsList.append(row);
+  });
+
+  if (!accountState.teams.length) {
+    resetTeamForm();
+    teamsList.innerHTML = '<div class="goal-detail">No teams yet.</div>';
+  }
+}
+
+async function saveTeamFromForm() {
+  const name = teamName.value.trim();
+  if (!name) {
+    teamsStatus.textContent = "Team name is required.";
+    return;
+  }
+
+  const payload = {
+    id: teamForm.dataset.teamId || null,
+    name,
+    age_group: teamAge.value.trim(),
+    game_format: gameFormats[teamFormat.value] ? teamFormat.value : "11v11"
+  };
+
+  try {
+    const saved = payload.id ? await updateTeam(payload) : await createTeam(payload);
+    accountState.teams = await loadTeams();
+    await setSelectedTeam(saved.id);
+    resetTeamForm(saved);
+    setAccountMessage(`Saved ${saved.name}.`);
+  } catch (error) {
+    teamsStatus.textContent = error.message || "Could not save team.";
+  }
+}
+
+async function handleTeamListAction(button) {
+  const teamId = button.dataset.teamId;
+  const action = button.dataset.teamAction;
+  const team = accountState.teams.find((item) => item.id === teamId);
+
+  if (!team) {
+    return;
+  }
+
+  if (action === "edit") {
+    resetTeamForm(team);
+    return;
+  }
+
+  try {
+    if (action === "select") {
+      await setSelectedTeam(teamId);
+      resetTeamForm(team);
+      return;
+    }
+
+    if (action === "delete") {
+      const confirmed = window.confirm(`Delete ${team.name}? This removes its roster from the server.`);
+      if (!confirmed) {
+        return;
+      }
+
+      await deleteTeam(teamId);
+      accountState.teams = await loadTeams();
+      accountState.selectedTeamId = null;
+      resetTeamForm();
+      const nextTeam = accountState.teams[0] || null;
+      await setSelectedTeam(nextTeam ? nextTeam.id : null);
+    }
+  } catch (error) {
+    teamsStatus.textContent = error.message || "Could not update team.";
+  }
+}
+
+async function dismissOnboarding() {
+  accountState.onboardingDismissed = true;
+  onboardingStrip.classList.add("hidden");
+
+  if (isServerMode() && accountState.profile) {
+    const { data, error } = await supabaseClient
+      .from("profiles")
+      .update({ onboarding_dismissed: true })
+      .eq("id", accountState.user.id)
+      .select("*")
+      .single();
+
+    if (!error) {
+      accountState.profile = data;
+    }
+  }
 }
 
 function openRosterSheet() {
@@ -756,22 +1433,37 @@ function toggleStarter(playerId) {
   renderRosterSheet();
 }
 
-function addRosterPlayer(name) {
+async function addRosterPlayer(name) {
   const playerName = name.trim();
   if (!playerName) {
     return;
   }
 
-  const player = { id: makePlayerId(playerName), name: playerName };
-  roster.push(player);
-  state.roster = roster;
+  let player = { id: makePlayerId(playerName), name: playerName };
+
+  try {
+    if (isServerMode() && accountState.selectedTeamId) {
+      const saved = await savePlayer({ name: playerName, sort_order: roster.length });
+      const players = await loadPlayers(accountState.selectedTeamId);
+      applyTeamRoster(getSelectedTeam(), players);
+      player = roster.find((item) => item.serverId === saved.id) || mapServerPlayer(saved);
+    } else {
+      roster.push(player);
+      state.roster = roster;
+    }
+  } catch (error) {
+    setAccountMessage(error.message || "Could not save player.");
+    return;
+  }
+
   state.presence[player.id] = true;
   saveGame();
   renderRosterSheet();
+  renderTeamsSheet();
   showRoster();
 }
 
-function renameRosterPlayer(playerId, name) {
+async function renameRosterPlayer(playerId, name) {
   const player = roster.find((item) => item.id === playerId);
   const playerName = name.trim();
   if (!player || !playerName) {
@@ -779,14 +1471,29 @@ function renameRosterPlayer(playerId, name) {
     return;
   }
 
-  player.name = playerName;
-  state.roster = roster;
+  try {
+    if (isServerMode() && player.serverId) {
+      const saved = await savePlayer({ ...player, name: playerName });
+      const players = await loadPlayers(accountState.selectedTeamId);
+      applyTeamRoster(getSelectedTeam(), players);
+      setAccountMessage(`Saved ${saved.name}.`);
+    } else {
+      player.name = playerName;
+      state.roster = roster;
+    }
+  } catch (error) {
+    setAccountMessage(error.message || "Could not rename player.");
+    renderRosterSheet();
+    return;
+  }
+
   saveGame();
   renderRosterSheet();
+  renderTeamsSheet();
   showRoster();
 }
 
-function removeRosterPlayer(playerId) {
+async function removeRosterPlayer(playerId) {
   const player = roster.find((item) => item.id === playerId);
   if (!player) {
     return;
@@ -794,6 +1501,16 @@ function removeRosterPlayer(playerId) {
 
   const confirmed = window.confirm(`Remove ${player.name} from the roster? Existing observations by name will remain in the log.`);
   if (!confirmed) {
+    return;
+  }
+
+  try {
+    if (isServerMode() && player.serverId) {
+      await deletePlayer(playerId);
+      await loadPlayers(accountState.selectedTeamId);
+    }
+  } catch (error) {
+    setAccountMessage(error.message || "Could not remove player.");
     return;
   }
 
@@ -812,6 +1529,7 @@ function removeRosterPlayer(playerId) {
     .filter((event) => event.subs.length);
   saveGame();
   renderRosterSheet();
+  renderTeamsSheet();
   renderSubStrip();
   showRoster();
 }
@@ -1097,12 +1815,13 @@ function renderSetupRoster() {
     const row = document.createElement("article");
     row.className = "roster-row";
     const present = isPresent(player.id);
+    const safeName = escapeHtml(player.name);
     row.innerHTML = `
       <div>
-        <div class="stat-name">${player.name}</div>
+        <div class="stat-name">${safeName}</div>
         <div class="goal-detail">${present ? "Available for this game" : "Will be hidden from game pickers"}</div>
       </div>
-      <button class="toggle-pill ${present ? "active" : ""}" data-setup-action="presence" data-player-id="${player.id}" type="button">
+      <button class="toggle-pill ${present ? "active" : ""}" data-setup-action="presence" data-player-id="${escapeHtml(player.id)}" type="button">
         ${present ? "Present" : "Absent"}
       </button>
     `;
@@ -1127,12 +1846,13 @@ function renderSetupStarters() {
     const row = document.createElement("article");
     row.className = "roster-row";
     const starter = state.startingLineup.includes(player.id);
+    const safeName = escapeHtml(player.name);
     row.innerHTML = `
       <div>
-        <div class="stat-name">${player.name}</div>
+        <div class="stat-name">${safeName}</div>
         <div class="goal-detail">${starter ? "Starting" : "Bench at kickoff"}</div>
       </div>
-      <button class="toggle-pill ${starter ? "active" : ""}" data-setup-action="starter" data-player-id="${player.id}" type="button">
+      <button class="toggle-pill ${starter ? "active" : ""}" data-setup-action="starter" data-player-id="${escapeHtml(player.id)}" type="button">
         ${starter ? "Start" : "Bench"}
       </button>
     `;
@@ -1722,9 +2442,13 @@ resetClock.addEventListener("click", openResetSheet);
 cancelObservation.addEventListener("click", showRoster);
 undoLast.addEventListener("click", undoLastObservation);
 installButton.addEventListener("click", promptInstallApp);
+authButton.addEventListener("click", openAuthSheet);
+teamsButton.addEventListener("click", openTeamsSheet);
 newGameButton.addEventListener("click", openSetupSheet);
 rosterButton.addEventListener("click", openRosterSheet);
 closeRoster.addEventListener("click", closeRosterSheet);
+closeAuth.addEventListener("click", closeAuthSheet);
+closeTeams.addEventListener("click", closeTeamsSheet);
 subsButton.addEventListener("click", openSubSheet);
 closeSubs.addEventListener("click", closeSubSheet);
 subsMadeButton.addEventListener("click", commitStagedSubs);
@@ -1757,6 +2481,72 @@ setupNext.addEventListener("click", () => {
   renderSetupStep();
 });
 setupStart.addEventListener("click", finishSetup);
+
+accountStrip.addEventListener("click", (event) => {
+  const authTarget = event.target.closest("#inlineAuthButton");
+  const teamsTarget = event.target.closest("#inlineTeamsButton");
+
+  if (authTarget) {
+    openAuthSheet();
+  } else if (teamsTarget) {
+    openTeamsSheet();
+  }
+});
+
+onboardingAction.addEventListener("click", openTeamsSheet);
+onboardingLater.addEventListener("click", () => {
+  dismissOnboarding().catch(() => {});
+});
+
+emailSignInForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const email = authEmail.value.trim();
+  if (!email) {
+    authStatus.textContent = "Enter an email address.";
+    return;
+  }
+
+  try {
+    await signInWithEmail(email);
+    renderAuthSheet();
+  } catch (error) {
+    authStatus.textContent = error.message || "Could not send sign-in link.";
+  }
+});
+
+googleSignIn.addEventListener("click", () => {
+  signInWithGoogle().catch((error) => {
+    authStatus.textContent = error.message || "Could not start Google sign-in.";
+  });
+});
+
+signOutButton.addEventListener("click", async () => {
+  try {
+    await signOut();
+    closeAuthSheet();
+  } catch (error) {
+    authStatus.textContent = error.message || "Could not sign out.";
+  }
+});
+
+teamForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  saveTeamFromForm();
+});
+
+teamsList.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-team-action]");
+  if (!button) {
+    return;
+  }
+
+  handleTeamListAction(button);
+});
+
+openTeamRoster.addEventListener("click", () => {
+  closeTeamsSheet();
+  openRosterSheet();
+});
 
 setupBody.addEventListener("click", (event) => {
   const button = event.target.closest(".toggle-pill");
@@ -1846,6 +2636,18 @@ rosterSheet.addEventListener("click", (event) => {
   }
 });
 
+authSheet.addEventListener("click", (event) => {
+  if (event.target === authSheet) {
+    closeAuthSheet();
+  }
+});
+
+teamsSheet.addEventListener("click", (event) => {
+  if (event.target === teamsSheet) {
+    closeTeamsSheet();
+  }
+});
+
 subSheet.addEventListener("click", (event) => {
   if (event.target === subSheet) {
     closeSubSheet();
@@ -1882,6 +2684,16 @@ document.addEventListener("keydown", (event) => {
       return;
     }
 
+    if (!teamsSheet.classList.contains("hidden")) {
+      closeTeamsSheet();
+      return;
+    }
+
+    if (!authSheet.classList.contains("hidden")) {
+      closeAuthSheet();
+      return;
+    }
+
     if (!subSheet.classList.contains("hidden")) {
       closeSubSheet();
       return;
@@ -1913,9 +2725,11 @@ window.addEventListener("beforeunload", saveGame);
 setupInstallPrompt();
 loadGame();
 renderObservationButtons();
+renderAccountStatus();
 showRoster();
 renderSubStrip();
 renderClock();
+initializeAccount();
 
 if (state.running || state.halftimeRunning) {
   ensureTicker();
