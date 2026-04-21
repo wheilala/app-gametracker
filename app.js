@@ -94,6 +94,7 @@ const goalQualityTags = [
 ];
 
 const STORAGE_KEY = "rtsc-game-tracker-v1";
+const GAME_ARCHIVE_KEY = "rtsc-game-tracker-archive-v1";
 const SUPABASE_CONFIG = window.GAME_TRACKER_SUPABASE || {};
 const supabaseClient = window.supabase && SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey
   ? window.supabase.createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.anonKey)
@@ -120,7 +121,12 @@ const state = {
   stagedSubs: [],
   subEvents: [],
   entries: [],
-  goals: []
+  goals: [],
+  currentGameId: null,
+  currentGameCreatedAt: null,
+  currentGameUpdatedAt: null,
+  currentGameSavedAt: null,
+  serverGameId: null
 };
 
 const accountState = {
@@ -130,6 +136,7 @@ const accountState = {
   teams: [],
   selectedTeamId: null,
   playersByTeam: new Map(),
+  games: [],
   loading: false,
   message: supabaseClient ? "" : "Local only: add Supabase config to save teams online.",
   onboardingDismissed: false
@@ -200,6 +207,7 @@ const subStagedList = document.querySelector("#subStagedList");
 const subOptions = document.querySelector("#subOptions");
 const commitSubsSheet = document.querySelector("#commitSubsSheet");
 const goalButton = document.querySelector("#goalButton");
+const gameLogButton = document.querySelector("#gameLogButton");
 const goalSheet = document.querySelector("#goalSheet");
 const closeGoal = document.querySelector("#closeGoal");
 const goalStepLabel = document.querySelector("#goalStepLabel");
@@ -213,6 +221,14 @@ const tallyList = document.querySelector("#tallyList");
 const summaryStrip = document.querySelector("#summaryStrip");
 const copyGameLog = document.querySelector("#copyGameLog");
 const clearGame = document.querySelector("#clearGame");
+const gamesSheet = document.querySelector("#gamesSheet");
+const closeGames = document.querySelector("#closeGames");
+const gamesSummary = document.querySelector("#gamesSummary");
+const gamesList = document.querySelector("#gamesList");
+const gamesDetail = document.querySelector("#gamesDetail");
+const copyArchivedGame = document.querySelector("#copyArchivedGame");
+const loadArchivedGame = document.querySelector("#loadArchivedGame");
+const deleteArchivedGame = document.querySelector("#deleteArchivedGame");
 const resetSheet = document.querySelector("#resetSheet");
 const resetClearLog = document.querySelector("#resetClearLog");
 const resetKeepLog = document.querySelector("#resetKeepLog");
@@ -231,6 +247,8 @@ const setupStart = document.querySelector("#setupStart");
 let ticker = null;
 let setupStep = 0;
 let deferredInstallPrompt = null;
+let saveGameTimer = null;
+let selectedArchivedGameId = null;
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -298,6 +316,252 @@ function selectedTeamPlayerCount() {
   return players.filter((player) => player.active !== false).length;
 }
 
+function ensureCurrentGameIdentity() {
+  if (!state.currentGameId) {
+    state.currentGameId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  }
+
+  if (!state.currentGameCreatedAt) {
+    state.currentGameCreatedAt = new Date().toISOString();
+  }
+
+  return state.currentGameId;
+}
+
+function getGameStatus() {
+  return state.period === "final" ? "final" : "in_progress";
+}
+
+function getTeamSnapshot() {
+  const selectedTeam = getSelectedTeam();
+  return selectedTeam
+    ? {
+        id: selectedTeam.id,
+        name: selectedTeam.name,
+        ageGroup: selectedTeam.age_group || "",
+        gameFormat: selectedTeam.game_format
+      }
+    : {
+        id: null,
+        name: "Local roster",
+        ageGroup: "",
+        gameFormat: state.gameFormat
+      };
+}
+
+function buildGameSnapshot() {
+  ensureCurrentGameIdentity();
+  const now = new Date().toISOString();
+  const score = getGoalScore();
+  const team = getTeamSnapshot();
+  const elapsedMs = getElapsedMs();
+
+  state.currentGameUpdatedAt = now;
+
+  return {
+    id: state.currentGameId,
+    serverGameId: state.serverGameId,
+    status: getGameStatus(),
+    team,
+    gameFormat: state.gameFormat,
+    trackPlayingTime: state.trackPlayingTime,
+    period: state.period,
+    running: state.running,
+    elapsedMs,
+    score,
+    roster: roster.map((player) => ({
+      id: player.id,
+      serverId: player.serverId || null,
+      name: player.name
+    })),
+    presence: { ...state.presence },
+    startingLineup: [...state.startingLineup],
+    initialOnField: [...state.initialOnField],
+    onField: [...state.onField],
+    stagedSubs: state.stagedSubs.map((pair) => ({ ...pair })),
+    subEvents: state.subEvents.map((event) => ({
+      ...event,
+      subs: event.subs.map((pair) => ({ ...pair }))
+    })),
+    entries: state.entries.map((entry) => ({ ...entry })),
+    goals: state.goals.map((goal) => ({
+      ...goal,
+      quality: Array.isArray(goal.quality) ? [...goal.quality] : []
+    })),
+    createdAt: state.currentGameCreatedAt,
+    updatedAt: now,
+    finalizedAt: state.period === "final" ? now : null
+  };
+}
+
+function readLocalGameArchive() {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(GAME_ARCHIVE_KEY) || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeLocalGameArchive(games) {
+  window.localStorage.setItem(GAME_ARCHIVE_KEY, JSON.stringify(games.slice(0, 80)));
+}
+
+function upsertLocalGameArchive(snapshot) {
+  const games = readLocalGameArchive();
+  const index = games.findIndex((game) => game.id === snapshot.id);
+
+  if (index >= 0) {
+    games[index] = snapshot;
+  } else {
+    games.unshift(snapshot);
+  }
+
+  games.sort((left, right) => new Date(right.updatedAt || right.createdAt) - new Date(left.updatedAt || left.createdAt));
+  writeLocalGameArchive(games);
+  state.currentGameSavedAt = snapshot.updatedAt;
+  return snapshot;
+}
+
+function getCurrentGamePayload() {
+  return buildGameSnapshot();
+}
+
+function scheduleGameArchiveSave() {
+  window.clearTimeout(saveGameTimer);
+  saveGameTimer = window.setTimeout(() => {
+    persistCurrentGame().catch((error) => setAccountMessage(error.message || "Could not save game log."));
+  }, 500);
+}
+
+async function persistCurrentGame() {
+  const snapshot = upsertLocalGameArchive(getCurrentGamePayload());
+
+  if (isServerMode()) {
+    await saveServerGame(snapshot);
+  }
+
+  renderAccountStatus();
+  return snapshot;
+}
+
+function buildServerGameRow(snapshot) {
+  return {
+    user_id: accountState.user.id,
+    team_id: snapshot.team.id || null,
+    team_name: snapshot.team.name,
+    game_format: snapshot.gameFormat,
+    status: snapshot.status,
+    started_at: snapshot.createdAt,
+    finalized_at: snapshot.finalizedAt,
+    elapsed_ms: Math.round(snapshot.elapsedMs || 0),
+    score_us: snapshot.score.us,
+    score_them: snapshot.score.them,
+    observation_count: snapshot.entries.length,
+    goal_count: snapshot.goals.length,
+    payload: snapshot
+  };
+}
+
+async function saveServerGame(snapshot) {
+  if (!isServerMode()) {
+    return null;
+  }
+
+  const payload = buildServerGameRow(snapshot);
+
+  if (state.serverGameId || snapshot.serverGameId) {
+    const { data, error } = await supabaseClient
+      .from("games")
+      .update(payload)
+      .eq("id", state.serverGameId || snapshot.serverGameId)
+      .select("*")
+      .single();
+
+    if (error) {
+      throw error;
+    }
+
+    state.serverGameId = data.id;
+    return data;
+  }
+
+  const { data, error } = await supabaseClient
+    .from("games")
+    .insert(payload)
+    .select("*")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  state.serverGameId = data.id;
+  snapshot.serverGameId = data.id;
+  upsertLocalGameArchive(snapshot);
+  return data;
+}
+
+async function loadServerGames() {
+  if (!isServerMode()) {
+    accountState.games = [];
+    return [];
+  }
+
+  const { data, error } = await supabaseClient
+  .from("games")
+  .select("*")
+    .order("updated_at", { ascending: false })
+    .limit(50);
+
+  if (error) {
+    throw error;
+  }
+
+  accountState.games = data || [];
+  return accountState.games;
+}
+
+async function deleteServerGame(game) {
+  if (!isServerMode() || !game.serverGameId) {
+    return;
+  }
+
+  const { error } = await supabaseClient
+    .from("games")
+    .delete()
+    .eq("id", game.serverGameId);
+
+  if (error) {
+    throw error;
+  }
+}
+
+function mergeGameArchives() {
+  const byId = new Map();
+
+  readLocalGameArchive().forEach((game) => byId.set(game.id, { ...game, source: "local" }));
+
+  accountState.games.forEach((row) => {
+    const payload = row.payload || {};
+    const id = payload.id || row.id;
+    byId.set(id, {
+      ...payload,
+      id,
+      serverGameId: row.id,
+      source: "server",
+      status: row.status,
+      updatedAt: row.updated_at || payload.updatedAt,
+      createdAt: row.created_at || payload.createdAt,
+      finalizedAt: row.finalized_at || payload.finalizedAt
+    });
+  });
+
+  return [...byId.values()].sort((left, right) => (
+    new Date(right.updatedAt || right.createdAt) - new Date(left.updatedAt || left.createdAt)
+  ));
+}
+
 function saveGame() {
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify({
     running: state.running,
@@ -317,8 +581,18 @@ function saveGame() {
     stagedSubs: state.stagedSubs,
     subEvents: state.subEvents,
     entries: state.entries,
-    goals: state.goals
+    goals: state.goals,
+    currentGameId: state.currentGameId,
+    currentGameCreatedAt: state.currentGameCreatedAt,
+    currentGameUpdatedAt: state.currentGameUpdatedAt,
+    currentGameSavedAt: state.currentGameSavedAt,
+    serverGameId: state.serverGameId
   }));
+}
+
+function saveGameAndArchive() {
+  saveGame();
+  scheduleGameArchiveSave();
 }
 
 function loadGame() {
@@ -348,6 +622,11 @@ function loadGame() {
     state.subEvents = Array.isArray(parsed.subEvents) ? parsed.subEvents.filter((event) => Array.isArray(event.subs)) : [];
     state.entries = Array.isArray(parsed.entries) ? parsed.entries : [];
     state.goals = Array.isArray(parsed.goals) ? parsed.goals : [];
+    state.currentGameId = parsed.currentGameId || null;
+    state.currentGameCreatedAt = parsed.currentGameCreatedAt || null;
+    state.currentGameUpdatedAt = parsed.currentGameUpdatedAt || null;
+    state.currentGameSavedAt = parsed.currentGameSavedAt || null;
+    state.serverGameId = parsed.serverGameId || null;
   } catch {
     window.localStorage.removeItem(STORAGE_KEY);
   }
@@ -684,6 +963,7 @@ async function refreshAccountData() {
     accountState.onboardingDismissed = Boolean(accountState.profile.onboarding_dismissed);
     accountState.teams = await loadTeams();
     await Promise.all(accountState.teams.map((team) => loadPlayers(team.id)));
+    await loadServerGames();
     const preferredTeamId = accountState.profile.selected_team_id;
     const selected = accountState.teams.find((team) => team.id === preferredTeamId) || accountState.teams[0] || null;
     accountState.selectedTeamId = selected ? selected.id : null;
@@ -727,6 +1007,7 @@ async function initializeAccount() {
     accountState.profile = null;
     accountState.teams = [];
     accountState.playersByTeam.clear();
+    accountState.games = [];
     accountState.selectedTeamId = null;
 
     if (accountState.user) {
@@ -886,7 +1167,7 @@ function startClock() {
   ensureTicker();
   renderClock();
   renderSubStrip();
-  saveGame();
+  saveGameAndArchive();
 }
 
 function finalWhistle() {
@@ -902,7 +1183,7 @@ function finalWhistle() {
   ticker = null;
   renderClock();
   renderSubStrip();
-  saveGame();
+  saveGameAndArchive();
 }
 
 function pauseClock() {
@@ -911,7 +1192,7 @@ function pauseClock() {
   window.clearInterval(ticker);
   ticker = null;
   renderClock();
-  saveGame();
+  saveGameAndArchive();
 }
 
 function resetClockOnly() {
@@ -933,10 +1214,21 @@ function resetClockOnly() {
   saveGame();
 }
 
+function startFreshGameIdentity() {
+  state.currentGameId = null;
+  state.currentGameCreatedAt = null;
+  state.currentGameUpdatedAt = null;
+  state.currentGameSavedAt = null;
+  state.serverGameId = null;
+  ensureCurrentGameIdentity();
+}
+
 function clearLogOnly() {
+  persistCurrentGame().catch(() => {});
   state.entries = [];
   state.goals = [];
   state.subEvents = [];
+  startFreshGameIdentity();
   saveGame();
   showRoster();
   renderSubStrip();
@@ -965,7 +1257,7 @@ function startHalftime() {
   state.halftimeStartedAt = Date.now();
   ensureTicker();
   renderClock();
-  saveGame();
+  saveGameAndArchive();
 }
 
 function startSecondHalf() {
@@ -981,7 +1273,7 @@ function startSecondHalf() {
   ensureTicker();
   renderClock();
   renderSubStrip();
-  saveGame();
+  saveGameAndArchive();
 }
 
 function openResetSheet() {
@@ -995,10 +1287,12 @@ function closeResetSheet() {
 }
 
 function resetAndClearLog() {
+  persistCurrentGame().catch(() => {});
   resetClockOnly();
   state.entries = [];
   state.goals = [];
   state.subEvents = [];
+  startFreshGameIdentity();
   saveGame();
   showRoster();
   renderSubStrip();
@@ -1012,10 +1306,12 @@ function resetAndClearLog() {
 
 function resetAndKeepLog() {
   resetClockOnly();
+  saveGameAndArchive();
   closeResetSheet();
 }
 
 function clearGameForNewSetup() {
+  persistCurrentGame().catch(() => {});
   state.running = false;
   state.period = "pre";
   state.elapsedBeforeStart = 0;
@@ -1030,11 +1326,13 @@ function clearGameForNewSetup() {
   state.subEvents = [];
   state.entries = [];
   state.goals = [];
+  startFreshGameIdentity();
   window.clearInterval(ticker);
   ticker = null;
   closeTallySheet();
   closeGoalFlow();
   closeSubSheet();
+  closeGamesSheet();
   closeTeamsSheet();
   closeAuthSheet();
   closeRosterSheet();
@@ -1313,6 +1611,263 @@ function renderTeamsSheet() {
     resetTeamForm();
     teamsList.innerHTML = '<div class="goal-detail">No teams yet.</div>';
   }
+}
+
+function formatGameDate(value) {
+  if (!value) {
+    return "Unknown date";
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(new Date(value));
+}
+
+function gameSummaryLine(game) {
+  const score = game.score || { us: 0, them: 0 };
+  const teamName = game.team && game.team.name ? game.team.name : game.team_name || "Game";
+  return `${teamName} | ${score.us}-${score.them} | ${game.entries ? game.entries.length : game.observation_count || 0} observations`;
+}
+
+function buildGameLogTextFromSnapshot(game) {
+  const gameRoster = game.roster || [];
+  const gameEntries = game.entries || [];
+  const gameGoals = game.goals || [];
+  const gameSubs = game.subEvents || [];
+  const score = game.score || { us: 0, them: 0 };
+  const positive = gameEntries.filter((entry) => entry.category === "positive").length;
+  const negative = gameEntries.filter((entry) => entry.category === "negative").length;
+  const lines = [
+    "Game Log",
+    "",
+    `Team: ${game.team && game.team.name ? game.team.name : "Local roster"}`,
+    `Clock: ${formatClock(game.elapsedMs || 0)}`,
+    `Format: ${game.gameFormat || "11v11"}`,
+    `Score: ${score.us}-${score.them}`,
+    `Status: ${game.status || "in_progress"}`,
+    `Observations: ${gameEntries.length} total (${positive} positive, ${negative} negative)`,
+    ""
+  ];
+
+  lines.push("Player Summary");
+  const teamEntries = gameEntries.filter((entry) => entry.player === "Team");
+  lines.push(`- Team: ${teamEntries.length} observations`);
+  gameRoster.forEach((player) => {
+    const entries = gameEntries.filter((entry) => entry.player === player.name);
+    const pos = entries.filter((entry) => entry.category === "positive").length;
+    const neg = entries.filter((entry) => entry.category === "negative").length;
+    lines.push(`- ${player.name}: ${entries.length} observations (+${pos} / -${neg})`);
+  });
+
+  lines.push("", "Observation Detail");
+  if (!gameEntries.length) {
+    lines.push("- None");
+  } else {
+    gameEntries.forEach((entry) => {
+      lines.push(`- ${formatClock(entry.elapsedMs)} | ${entry.player} | ${entry.category} | ${entry.observation}`);
+    });
+  }
+
+  lines.push("", "Goals");
+  if (!gameGoals.length) {
+    lines.push("- None");
+  } else {
+    gameGoals.forEach((goal, index) => {
+      if (goal.team === "us") {
+        lines.push(`- ${index + 1}. ${formatClock(goal.elapsedMs)} | Us | Scorer: ${goal.scorer || "Unknown"} | Assist: ${goal.assist || "None"} | Type: ${goal.type || "Unknown"} | Tags: ${goal.quality && goal.quality.length ? goal.quality.join(", ") : "None"}`);
+      } else {
+        lines.push(`- ${index + 1}. ${formatClock(goal.elapsedMs)} | Them`);
+      }
+    });
+  }
+
+  lines.push("", "Substitutions");
+  if (!gameSubs.length) {
+    lines.push("- None");
+  } else {
+    gameSubs.forEach((event, index) => {
+      const detail = event.subs
+        .map((pair) => {
+          const inPlayer = gameRoster.find((player) => player.id === pair.inId);
+          const outPlayer = gameRoster.find((player) => player.id === pair.outId);
+          return `${inPlayer ? inPlayer.name : pair.inId} for ${outPlayer ? outPlayer.name : pair.outId}`;
+        })
+        .join(", ");
+      lines.push(`- ${index + 1}. ${formatClock(event.elapsedMs)} | ${detail}`);
+    });
+  }
+
+  return lines.join("\n");
+}
+
+async function openGamesSheet() {
+  gamesSheet.classList.remove("hidden");
+  gamesSheet.setAttribute("aria-hidden", "false");
+  await refreshGameLogs();
+}
+
+function closeGamesSheet() {
+  gamesSheet.classList.add("hidden");
+  gamesSheet.setAttribute("aria-hidden", "true");
+}
+
+async function refreshGameLogs() {
+  try {
+    await persistCurrentGame();
+    if (isServerMode()) {
+      await loadServerGames();
+    }
+  } catch (error) {
+    setAccountMessage(error.message || "Could not refresh game logs.");
+  }
+
+  renderGamesSheet();
+}
+
+function renderGamesSheet() {
+  const games = mergeGameArchives();
+  gamesSummary.innerHTML = `
+    <span class="summary-pill">${games.length} saved</span>
+    <span class="summary-pill">${isServerMode() ? "Server sync on" : "Local archive"}</span>
+  `;
+  gamesList.innerHTML = "";
+
+  if (!games.length) {
+    gamesList.innerHTML = '<div class="goal-detail">No saved games yet. Logs save automatically as you track.</div>';
+    gamesDetail.innerHTML = "";
+    selectedArchivedGameId = null;
+    setGameLogActionState();
+    return;
+  }
+
+  if (!selectedArchivedGameId || !games.some((game) => game.id === selectedArchivedGameId)) {
+    selectedArchivedGameId = games[0].id;
+  }
+
+  games.forEach((game) => {
+    const button = document.createElement("button");
+    button.className = `game-log-row ${game.id === selectedArchivedGameId ? "selected" : ""}`;
+    button.type = "button";
+    button.dataset.gameId = game.id;
+    button.innerHTML = `
+      <span>${escapeHtml(gameSummaryLine(game))}</span>
+      <span>${escapeHtml(formatGameDate(game.updatedAt || game.createdAt))} | ${escapeHtml(game.status || "in_progress")} | ${escapeHtml(game.source || "local")}</span>
+    `;
+    gamesList.append(button);
+  });
+
+  const selected = games.find((game) => game.id === selectedArchivedGameId);
+  renderGameDetail(selected);
+  setGameLogActionState();
+}
+
+function renderGameDetail(game) {
+  if (!game) {
+    gamesDetail.innerHTML = "";
+    return;
+  }
+
+  const score = game.score || { us: 0, them: 0 };
+  gamesDetail.innerHTML = `
+    <div class="goal-title-line">
+      <span>${escapeHtml(game.team && game.team.name ? game.team.name : "Game")}</span>
+      <span>${score.us}-${score.them}</span>
+    </div>
+    <div class="goal-detail">${escapeHtml(formatGameDate(game.createdAt))} | ${escapeHtml(game.gameFormat || "11v11")} | ${escapeHtml(game.status || "in_progress")}</div>
+    <div class="summary-strip">
+      <span class="summary-pill">${(game.entries || []).length} observations</span>
+      <span class="summary-pill">${(game.goals || []).length} goals</span>
+      <span class="summary-pill">${(game.subEvents || []).length} sub events</span>
+      <span class="summary-pill">${formatClock(game.elapsedMs || 0)}</span>
+    </div>
+    <pre class="game-log-preview">${escapeHtml(buildGameLogTextFromSnapshot(game))}</pre>
+  `;
+}
+
+function setGameLogActionState() {
+  const hasSelection = Boolean(selectedArchivedGameId);
+  copyArchivedGame.disabled = !hasSelection;
+  loadArchivedGame.disabled = !hasSelection;
+  deleteArchivedGame.disabled = !hasSelection;
+}
+
+function getSelectedArchivedGame() {
+  return mergeGameArchives().find((game) => game.id === selectedArchivedGameId) || null;
+}
+
+async function copySelectedArchivedGame() {
+  const game = getSelectedArchivedGame();
+  if (!game) {
+    return;
+  }
+
+  await copyText(buildGameLogTextFromSnapshot(game));
+  copyArchivedGame.textContent = "Copied";
+  window.setTimeout(() => {
+    copyArchivedGame.textContent = "Copy Log";
+  }, 1400);
+}
+
+function loadArchivedGameIntoState(game) {
+  if (!game) {
+    return;
+  }
+
+  state.running = false;
+  state.period = game.status === "final" ? "final" : "pre";
+  state.elapsedBeforeStart = game.elapsedMs || 0;
+  state.startedAt = 0;
+  state.halftimeRunning = false;
+  state.halftimeElapsedBeforeStart = 0;
+  state.halftimeStartedAt = 0;
+  state.gameFormat = gameFormats[game.gameFormat] ? game.gameFormat : "11v11";
+  state.trackPlayingTime = Boolean(game.trackPlayingTime);
+  roster = normalizeRoster(game.roster || defaultRoster);
+  state.roster = roster;
+  state.presence = normalizePresence(game.presence || {});
+  state.startingLineup = normalizePlayerIds(game.startingLineup || [], []);
+  state.initialOnField = normalizePlayerIds(game.initialOnField || [], []);
+  state.onField = normalizePlayerIds(game.onField || [], []);
+  state.stagedSubs = [];
+  state.subEvents = Array.isArray(game.subEvents) ? game.subEvents : [];
+  state.entries = Array.isArray(game.entries) ? game.entries : [];
+  state.goals = Array.isArray(game.goals) ? game.goals : [];
+  state.currentGameId = game.id;
+  state.currentGameCreatedAt = game.createdAt || new Date().toISOString();
+  state.currentGameUpdatedAt = game.updatedAt || state.currentGameCreatedAt;
+  state.currentGameSavedAt = game.updatedAt || state.currentGameCreatedAt;
+  state.serverGameId = game.serverGameId || null;
+  window.clearInterval(ticker);
+  ticker = null;
+  saveGame();
+  closeGamesSheet();
+  renderClock();
+  renderSubStrip();
+  showRoster();
+}
+
+async function deleteArchivedGameRecord(game) {
+  if (!game) {
+    return;
+  }
+
+  const confirmed = window.confirm("Delete this saved game log?");
+  if (!confirmed) {
+    return;
+  }
+
+  const localGames = readLocalGameArchive().filter((item) => item.id !== game.id);
+  writeLocalGameArchive(localGames);
+  await deleteServerGame(game);
+  if (state.currentGameId === game.id) {
+    startFreshGameIdentity();
+    saveGame();
+  }
+  selectedArchivedGameId = null;
+  await refreshGameLogs();
 }
 
 async function saveTeamFromForm() {
@@ -1704,7 +2259,7 @@ function commitStagedSubs() {
   });
   state.stagedSubs = [];
   state.subDraft = null;
-  saveGame();
+  saveGameAndArchive();
   renderSubOutgoingStep();
   renderSubStrip();
   showRoster();
@@ -1988,7 +2543,7 @@ function closeGoalFlow() {
 
 function saveGoal(goal) {
   state.goals.push(goal);
-  saveGame();
+  saveGameAndArchive();
   closeGoalFlow();
   showRoster();
 
@@ -2091,7 +2646,7 @@ function logObservation(category, observation) {
     elapsedMs: getElapsedMs(),
     createdAt: new Date().toISOString()
   });
-  saveGame();
+  saveGameAndArchive();
   showRoster();
 }
 
@@ -2101,7 +2656,7 @@ function undoLastObservation() {
   }
 
   state.entries.pop();
-  saveGame();
+  saveGameAndArchive();
   showRoster();
 
   if (!tallySheet.classList.contains("hidden")) {
@@ -2369,8 +2924,7 @@ function buildGameLogEmailBody() {
   return lines.join("\n");
 }
 
-async function copyCurrentGameLog() {
-  const text = buildGameLogEmailBody();
+async function copyText(text) {
   if (navigator.clipboard && window.isSecureContext) {
     await navigator.clipboard.writeText(text);
   } else {
@@ -2384,6 +2938,11 @@ async function copyCurrentGameLog() {
     document.execCommand("copy");
     textArea.remove();
   }
+}
+
+async function copyCurrentGameLog() {
+  const text = buildGameLogEmailBody();
+  await copyText(text);
   copyGameLog.textContent = "Copied";
   window.setTimeout(() => {
     copyGameLog.textContent = "Copy Game Log to Clipboard";
@@ -2465,6 +3024,10 @@ finishGoal.addEventListener("click", () => {
 tallyButton.addEventListener("click", openTally);
 closeTally.addEventListener("click", closeTallySheet);
 copyGameLog.addEventListener("click", copyCurrentGameLog);
+gameLogButton.addEventListener("click", () => {
+  openGamesSheet();
+});
+closeGames.addEventListener("click", closeGamesSheet);
 
 clearGame.addEventListener("click", openResetSheet);
 resetClearLog.addEventListener("click", resetAndClearLog);
@@ -2532,6 +3095,28 @@ signOutButton.addEventListener("click", async () => {
 teamForm.addEventListener("submit", (event) => {
   event.preventDefault();
   saveTeamFromForm();
+});
+
+gamesList.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-game-id]");
+  if (!button) {
+    return;
+  }
+
+  selectedArchivedGameId = button.dataset.gameId;
+  renderGamesSheet();
+});
+
+copyArchivedGame.addEventListener("click", () => {
+  copySelectedArchivedGame().catch((error) => setAccountMessage(error.message || "Could not copy game log."));
+});
+
+loadArchivedGame.addEventListener("click", () => {
+  loadArchivedGameIntoState(getSelectedArchivedGame());
+});
+
+deleteArchivedGame.addEventListener("click", () => {
+  deleteArchivedGameRecord(getSelectedArchivedGame()).catch((error) => setAccountMessage(error.message || "Could not delete game log."));
 });
 
 teamsList.addEventListener("click", (event) => {
@@ -2648,6 +3233,12 @@ teamsSheet.addEventListener("click", (event) => {
   }
 });
 
+gamesSheet.addEventListener("click", (event) => {
+  if (event.target === gamesSheet) {
+    closeGamesSheet();
+  }
+});
+
 subSheet.addEventListener("click", (event) => {
   if (event.target === subSheet) {
     closeSubSheet();
@@ -2689,6 +3280,11 @@ document.addEventListener("keydown", (event) => {
       return;
     }
 
+    if (!gamesSheet.classList.contains("hidden")) {
+      closeGamesSheet();
+      return;
+    }
+
     if (!authSheet.classList.contains("hidden")) {
       closeAuthSheet();
       return;
@@ -2724,11 +3320,13 @@ window.addEventListener("beforeunload", saveGame);
 
 setupInstallPrompt();
 loadGame();
+ensureCurrentGameIdentity();
 renderObservationButtons();
 renderAccountStatus();
 showRoster();
 renderSubStrip();
 renderClock();
+persistCurrentGame().catch(() => {});
 initializeAccount();
 
 if (state.running || state.halftimeRunning) {

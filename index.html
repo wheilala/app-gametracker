@@ -28,6 +28,7 @@
           <button class="quiet-button" id="rosterButton" type="button">Roster</button>
           <button class="quiet-button" id="subsButton" type="button">Subs</button>
           <button class="quiet-button" id="goalButton" type="button">Goal</button>
+          <button class="quiet-button" id="gameLogButton" type="button">Logs</button>
           <button class="icon-button" id="tallyButton" type="button" aria-label="Open tally">
             <span aria-hidden="true">#</span>
           </button>
@@ -217,6 +218,30 @@
         <div class="tally-list" id="tallyList"></div>
         <button class="secondary-action wide-action" id="copyGameLog" type="button">Copy Game Log to Clipboard</button>
         <button class="danger-action" id="clearGame" type="button">Clear game data</button>
+      </div>
+    </aside>
+
+    <aside class="games-sheet hidden" id="gamesSheet" aria-hidden="true">
+      <div class="games-card" role="dialog" aria-modal="true" aria-labelledby="gamesTitle">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Saved games</p>
+            <h2 id="gamesTitle">Game Logs</h2>
+          </div>
+          <button class="icon-button" id="closeGames" type="button" aria-label="Close game logs">
+            <span aria-hidden="true">x</span>
+          </button>
+        </div>
+        <div class="summary-strip" id="gamesSummary"></div>
+        <div class="games-layout">
+          <div class="games-list" id="gamesList"></div>
+          <div class="games-detail" id="gamesDetail"></div>
+        </div>
+        <div class="games-actions">
+          <button class="secondary-action" id="copyArchivedGame" type="button">Copy Log</button>
+          <button class="secondary-action" id="loadArchivedGame" type="button">Load</button>
+          <button class="danger-action" id="deleteArchivedGame" type="button">Delete</button>
+        </div>
       </div>
     </aside>
 

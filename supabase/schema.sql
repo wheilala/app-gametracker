@@ -29,8 +29,30 @@ create table if not exists public.players (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists public.games (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  team_id uuid references public.teams(id) on delete set null,
+  team_name text,
+  game_format text not null default '11v11' check (game_format in ('7v7', '9v9', '11v11')),
+  status text not null default 'in_progress' check (status in ('in_progress', 'final', 'archived')),
+  started_at timestamptz,
+  finalized_at timestamptz,
+  elapsed_ms integer not null default 0,
+  score_us integer not null default 0,
+  score_them integer not null default 0,
+  observation_count integer not null default 0,
+  goal_count integer not null default 0,
+  payload jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create index if not exists teams_user_id_idx on public.teams(user_id);
 create index if not exists players_team_id_idx on public.players(team_id);
+create index if not exists games_user_id_idx on public.games(user_id);
+create index if not exists games_team_id_idx on public.games(team_id);
+create index if not exists games_updated_at_idx on public.games(updated_at desc);
 
 create or replace function public.set_updated_at()
 returns trigger
@@ -57,6 +79,11 @@ create trigger set_players_updated_at
 before update on public.players
 for each row execute function public.set_updated_at();
 
+drop trigger if exists set_games_updated_at on public.games;
+create trigger set_games_updated_at
+before update on public.games
+for each row execute function public.set_updated_at();
+
 create or replace function public.handle_new_user()
 returns trigger
 language plpgsql
@@ -79,6 +106,7 @@ for each row execute function public.handle_new_user();
 alter table public.profiles enable row level security;
 alter table public.teams enable row level security;
 alter table public.players enable row level security;
+alter table public.games enable row level security;
 
 drop policy if exists "Users can read own profile" on public.profiles;
 create policy "Users can read own profile"
@@ -117,5 +145,21 @@ with check (
     select 1 from public.teams
     where teams.id = players.team_id
       and teams.user_id = (select auth.uid())
+  )
+);
+
+drop policy if exists "Users can manage own games" on public.games;
+create policy "Users can manage own games"
+on public.games for all
+using ((select auth.uid()) = user_id)
+with check (
+  (select auth.uid()) = user_id
+  and (
+    team_id is null
+    or exists (
+      select 1 from public.teams
+      where teams.id = games.team_id
+        and teams.user_id = (select auth.uid())
+    )
   )
 );

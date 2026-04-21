@@ -459,6 +459,7 @@ h2 {
 
 .goal-sheet,
 .auth-sheet,
+.games-sheet,
 .roster-sheet,
 .reset-sheet,
 .setup-sheet,
@@ -476,6 +477,7 @@ h2 {
 
 .goal-card,
 .auth-card,
+.games-card,
 .roster-card,
 .reset-card,
 .setup-card,
@@ -500,6 +502,7 @@ h2 {
 }
 
 .roster-card,
+.games-card,
 .setup-card,
 .sub-card,
 .teams-card {
@@ -683,6 +686,78 @@ h2 {
 .team-manage-row.selected {
   border-color: #a8d7b5;
   background: var(--positive-soft);
+}
+
+.games-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+  gap: 10px;
+  min-height: 0;
+}
+
+.games-list {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-height: 0;
+  overflow: auto;
+}
+
+.game-log-row {
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 10px;
+  text-align: left;
+  font-weight: 900;
+}
+
+.game-log-row span:last-child {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 750;
+}
+
+.game-log-row.selected {
+  border-color: #a8d7b5;
+  background: var(--positive-soft);
+  color: var(--field);
+}
+
+.games-detail {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 10px;
+}
+
+.game-log-preview {
+  max-height: 42vh;
+  overflow: auto;
+  margin: 0;
+  border-radius: 8px;
+  background: #f8fbf9;
+  color: var(--ink);
+  padding: 10px;
+  white-space: pre-wrap;
+  font: 0.78rem/1.35 ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.games-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.games-actions .danger-action {
+  min-height: 42px;
 }
 
 .roster-name-input {
@@ -982,6 +1057,7 @@ button:focus-visible {
   }
 
   .goal-card,
+  .games-card,
   .sub-card,
   .teams-card {
     min-height: min(90vh, 680px);
@@ -995,6 +1071,15 @@ button:focus-visible {
 
   .team-manage-row {
     grid-template-columns: 1fr;
+  }
+
+  .games-layout,
+  .games-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .game-log-preview {
+    max-height: 34vh;
   }
 
   .goal-options {
