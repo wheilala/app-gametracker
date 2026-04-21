@@ -111,6 +111,14 @@ h2 {
   gap: 8px;
 }
 
+.account-status-line {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
 .quiet-button {
   min-width: 56px;
   min-height: 42px;
@@ -123,8 +131,8 @@ h2 {
 }
 
 .game-clock,
+.current-game-strip,
 .sub-strip,
-.account-strip,
 .onboarding-strip,
 .undo-strip,
 .entry-panel {
@@ -140,6 +148,28 @@ h2 {
   gap: 10px;
   align-items: center;
   padding: 10px 12px;
+}
+
+.current-game-strip {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
+}
+
+.current-game-meta {
+  color: var(--ink);
+  font-size: 0.86rem;
+  font-weight: 850;
+  line-height: 1.2;
+}
+
+.current-game-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
 }
 
 .clock-readout {
@@ -232,7 +262,6 @@ h2 {
   padding: 10px 12px;
 }
 
-.account-strip,
 .onboarding-strip {
   display: flex;
   align-items: center;
@@ -460,6 +489,8 @@ h2 {
 .goal-sheet,
 .auth-sheet,
 .games-sheet,
+.help-sheet,
+.observations-sheet,
 .roster-sheet,
 .reset-sheet,
 .setup-sheet,
@@ -478,6 +509,8 @@ h2 {
 .goal-card,
 .auth-card,
 .games-card,
+.help-card,
+.observations-card,
 .roster-card,
 .reset-card,
 .setup-card,
@@ -503,6 +536,8 @@ h2 {
 
 .roster-card,
 .games-card,
+.help-card,
+.observations-card,
 .setup-card,
 .sub-card,
 .teams-card {
@@ -627,6 +662,10 @@ h2 {
 .auth-form input,
 .team-edit-form input,
 .team-edit-form select,
+.observation-edit-form input,
+.observation-edit-form select,
+.game-meta-form input,
+.game-meta-form select,
 .roster-name-input {
   min-width: 0;
   min-height: 40px;
@@ -651,7 +690,9 @@ h2 {
 }
 
 .auth-form,
-.team-edit-form {
+.team-edit-form,
+.observation-edit-form,
+.game-meta-form {
   display: grid;
   gap: 8px;
 }
@@ -663,6 +704,16 @@ h2 {
 .team-edit-form .primary-action {
   grid-column: 1 / -1;
   width: 100%;
+}
+
+.observation-edit-form,
+.game-meta-form {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.observation-edit-form input,
+.observation-edit-form .primary-action {
+  grid-column: 1 / -1;
 }
 
 .teams-list {
@@ -686,6 +737,43 @@ h2 {
 .team-manage-row.selected {
   border-color: #a8d7b5;
   background: var(--positive-soft);
+}
+
+.observation-choice-list {
+  display: grid;
+  gap: 8px;
+  min-height: 0;
+  overflow: auto;
+}
+
+.observation-choice-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 10px;
+}
+
+.help-content {
+  display: grid;
+  gap: 12px;
+  min-height: 0;
+  overflow: auto;
+}
+
+.help-content h3 {
+  margin: 0 0 4px;
+  font-size: 1rem;
+}
+
+.help-content p {
+  margin: 0;
+  color: var(--muted);
+  font-weight: 750;
+  line-height: 1.4;
 }
 
 .games-layout {
@@ -1069,13 +1157,36 @@ button:focus-visible {
     grid-template-columns: 1fr;
   }
 
-  .team-manage-row {
+  .observation-edit-form,
+  .game-meta-form {
+    grid-template-columns: 1fr;
+  }
+
+  .observation-edit-form input,
+  .observation-edit-form .primary-action {
+    grid-column: auto;
+  }
+
+  .team-manage-row,
+  .observation-choice-row {
     grid-template-columns: 1fr;
   }
 
   .games-layout,
   .games-actions {
     grid-template-columns: 1fr;
+  }
+
+  .current-game-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .current-game-actions {
+    justify-content: stretch;
+  }
+
+  .current-game-actions .quiet-button {
+    flex: 1;
   }
 
   .game-log-preview {

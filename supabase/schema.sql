@@ -5,6 +5,7 @@ create table if not exists public.profiles (
   email text,
   selected_team_id uuid,
   onboarding_dismissed boolean not null default false,
+  onboarding_completed boolean not null default false,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -34,6 +35,8 @@ create table if not exists public.games (
   user_id uuid not null references auth.users(id) on delete cascade,
   team_id uuid references public.teams(id) on delete set null,
   team_name text,
+  opponent_name text,
+  match_type text not null default 'League' check (match_type in ('League', 'Tournament', 'Cup', 'Friendly')),
   game_format text not null default '11v11' check (game_format in ('7v7', '9v9', '11v11')),
   status text not null default 'in_progress' check (status in ('in_progress', 'final', 'archived')),
   started_at timestamptz,
@@ -48,11 +51,43 @@ create table if not exists public.games (
   updated_at timestamptz not null default now()
 );
 
+alter table public.profiles add column if not exists onboarding_completed boolean not null default false;
+alter table public.games add column if not exists opponent_name text;
+alter table public.games add column if not exists match_type text not null default 'League';
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conname = 'games_match_type_check'
+      and conrelid = 'public.games'::regclass
+  ) then
+    alter table public.games
+      add constraint games_match_type_check
+      check (match_type in ('League', 'Tournament', 'Cup', 'Friendly'));
+  end if;
+end;
+$$;
+
+create table if not exists public.observation_choices (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  target text not null check (target in ('player', 'team')),
+  category text not null check (category in ('positive', 'negative')),
+  label text not null,
+  sort_order integer not null default 0,
+  active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create index if not exists teams_user_id_idx on public.teams(user_id);
 create index if not exists players_team_id_idx on public.players(team_id);
 create index if not exists games_user_id_idx on public.games(user_id);
 create index if not exists games_team_id_idx on public.games(team_id);
 create index if not exists games_updated_at_idx on public.games(updated_at desc);
+create index if not exists observation_choices_user_id_idx on public.observation_choices(user_id);
+create index if not exists observation_choices_lookup_idx on public.observation_choices(user_id, target, category, active, sort_order);
 
 create or replace function public.set_updated_at()
 returns trigger
@@ -84,6 +119,11 @@ create trigger set_games_updated_at
 before update on public.games
 for each row execute function public.set_updated_at();
 
+drop trigger if exists set_observation_choices_updated_at on public.observation_choices;
+create trigger set_observation_choices_updated_at
+before update on public.observation_choices
+for each row execute function public.set_updated_at();
+
 create or replace function public.handle_new_user()
 returns trigger
 language plpgsql
@@ -107,6 +147,7 @@ alter table public.profiles enable row level security;
 alter table public.teams enable row level security;
 alter table public.players enable row level security;
 alter table public.games enable row level security;
+alter table public.observation_choices enable row level security;
 
 drop policy if exists "Users can read own profile" on public.profiles;
 create policy "Users can read own profile"
@@ -163,3 +204,9 @@ with check (
     )
   )
 );
+
+drop policy if exists "Users can manage own observation choices" on public.observation_choices;
+create policy "Users can manage own observation choices"
+on public.observation_choices for all
+using ((select auth.uid()) = user_id)
+with check ((select auth.uid()) = user_id);

@@ -33,11 +33,11 @@ The workflow requires a repository secret named `PAGES_PUBLISH_TOKEN` with permi
 3. Copy the project URL and anon/public key into `supabase-config.js`.
 4. Keep `enableGoogle` set to `false` until the Google provider is configured in Supabase.
 
-The browser app only uses the public anon key. Row Level Security in `supabase/schema.sql` limits users to their own profile, teams, players, and game logs.
+The browser app only uses the public anon key. Row Level Security in `supabase/schema.sql` limits users to their own profile, teams, players, observation choices, and game logs.
 
 ## Notes
 
 - Active game data and a local game-log archive are saved in browser `localStorage`.
-- Accounts, teams, rosters, and game logs can sync through Supabase when configured.
+- Accounts, teams, rosters, curated observation choices, and game logs can sync through Supabase when configured.
 - The app is intentionally static: no build step.
 - PWA install support requires `localhost` or HTTPS in most browsers.

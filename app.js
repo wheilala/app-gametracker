@@ -27,7 +27,7 @@ const defaultPresence = defaultRoster.reduce((presence, player) => {
   return presence;
 }, {});
 
-const observations = {
+const defaultObservations = {
   positive: [
     "Good touch",
     "Talked",
@@ -54,7 +54,7 @@ const observations = {
   ]
 };
 
-const teamObservations = {
+const defaultTeamObservations = {
   positive: [
     "Kept shape",
     "Pressed together",
@@ -77,6 +77,24 @@ const teamObservations = {
   ]
 };
 
+function cloneObservationSet(source) {
+  return {
+    positive: [...(source.positive || [])],
+    negative: [...(source.negative || [])]
+  };
+}
+
+let observations = cloneObservationSet(defaultObservations);
+let teamObservations = cloneObservationSet(defaultTeamObservations);
+const observationChoiceDefaults = [
+  ...Object.entries(defaultObservations).flatMap(([category, labels]) => (
+    labels.map((label, index) => ({ target: "player", category, label, sort_order: index }))
+  )),
+  ...Object.entries(defaultTeamObservations).flatMap(([category, labels]) => (
+    labels.map((label, index) => ({ target: "team", category, label, sort_order: index }))
+  ))
+];
+
 const goalTypes = [
   "Corner",
   "Restart",
@@ -92,6 +110,8 @@ const goalQualityTags = [
   "Amazing",
   "Preventable"
 ];
+
+const matchTypes = ["League", "Tournament", "Cup", "Friendly"];
 
 const STORAGE_KEY = "rtsc-game-tracker-v1";
 const GAME_ARCHIVE_KEY = "rtsc-game-tracker-archive-v1";
@@ -113,6 +133,8 @@ const state = {
   halftimeStartedAt: 0,
   gameFormat: "11v11",
   trackPlayingTime: false,
+  opponentName: "",
+  matchType: "League",
   roster: [...defaultRoster],
   presence: { ...defaultPresence },
   startingLineup: [...defaultStartingLineup],
@@ -137,6 +159,7 @@ const accountState = {
   selectedTeamId: null,
   playersByTeam: new Map(),
   games: [],
+  observationChoices: [],
   loading: false,
   message: supabaseClient ? "" : "Local only: add Supabase config to save teams online.",
   onboardingDismissed: false
@@ -165,7 +188,9 @@ const installButton = document.querySelector("#installButton");
 const newGameButton = document.querySelector("#newGameButton");
 const authButton = document.querySelector("#authButton");
 const teamsButton = document.querySelector("#teamsButton");
-const accountStrip = document.querySelector("#accountStrip");
+const helpButton = document.querySelector("#helpButton");
+const accountStatusLine = document.querySelector("#accountStatusLine");
+const currentGameMeta = document.querySelector("#currentGameMeta");
 const onboardingStrip = document.querySelector("#onboardingStrip");
 const onboardingText = document.querySelector("#onboardingText");
 const onboardingAction = document.querySelector("#onboardingAction");
@@ -198,6 +223,19 @@ const teamFormat = document.querySelector("#teamFormat");
 const saveTeamButton = document.querySelector("#saveTeamButton");
 const teamsList = document.querySelector("#teamsList");
 const openTeamRoster = document.querySelector("#openTeamRoster");
+const openObservationsFromTeams = document.querySelector("#openObservationsFromTeams");
+const observationsSheet = document.querySelector("#observationsSheet");
+const closeObservations = document.querySelector("#closeObservations");
+const observationsStatus = document.querySelector("#observationsStatus");
+const observationForm = document.querySelector("#observationForm");
+const observationTarget = document.querySelector("#observationTarget");
+const observationCategory = document.querySelector("#observationCategory");
+const observationLabel = document.querySelector("#observationLabel");
+const saveObservationChoiceButton = document.querySelector("#saveObservationChoice");
+const observationChoiceList = document.querySelector("#observationChoiceList");
+const helpSheet = document.querySelector("#helpSheet");
+const closeHelp = document.querySelector("#closeHelp");
+const openObservationsFromHelp = document.querySelector("#openObservationsFromHelp");
 const subSheet = document.querySelector("#subSheet");
 const closeSubs = document.querySelector("#closeSubs");
 const subStepLabel = document.querySelector("#subStepLabel");
@@ -239,6 +277,9 @@ const setupStepLabel = document.querySelector("#setupStepLabel");
 const setupTitle = document.querySelector("#setupTitle");
 const setupProgress = document.querySelector("#setupProgress");
 const setupCopy = document.querySelector("#setupCopy");
+const gameMetaForm = document.querySelector("#gameMetaForm");
+const opponentName = document.querySelector("#opponentName");
+const matchType = document.querySelector("#matchType");
 const setupBody = document.querySelector("#setupBody");
 const setupBack = document.querySelector("#setupBack");
 const setupNext = document.querySelector("#setupNext");
@@ -270,6 +311,53 @@ function setAccountMessage(message) {
 
 function getSelectedTeam() {
   return accountState.teams.find((team) => team.id === accountState.selectedTeamId) || null;
+}
+
+function applyObservationChoices(choices) {
+  observations = cloneObservationSet(defaultObservations);
+  teamObservations = cloneObservationSet(defaultTeamObservations);
+
+  if (!Array.isArray(choices) || !choices.length) {
+    return;
+  }
+
+  const next = {
+    player: { positive: [], negative: [] },
+    team: { positive: [], negative: [] }
+  };
+
+  choices
+    .filter((choice) => choice.active !== false)
+    .sort((left, right) => (left.sort_order || 0) - (right.sort_order || 0) || left.label.localeCompare(right.label))
+    .forEach((choice) => {
+      if (next[choice.target] && next[choice.target][choice.category]) {
+        next[choice.target][choice.category].push(choice.label);
+      }
+    });
+
+  observations = {
+    positive: next.player.positive,
+    negative: next.player.negative
+  };
+
+  teamObservations = {
+    positive: next.team.positive,
+    negative: next.team.negative
+  };
+}
+
+function getObservationCategory(target, label) {
+  const source = target === "team" ? teamObservations : observations;
+  if (source.positive.includes(label)) {
+    return "positive";
+  }
+
+  if (source.negative.includes(label)) {
+    return "negative";
+  }
+
+  const entry = state.entries.find((item) => item.observation === label);
+  return entry ? entry.category : "negative";
 }
 
 function mapServerPlayer(player) {
@@ -363,6 +451,8 @@ function buildGameSnapshot() {
     serverGameId: state.serverGameId,
     status: getGameStatus(),
     team,
+    opponentName: state.opponentName,
+    matchType: state.matchType,
     gameFormat: state.gameFormat,
     trackPlayingTime: state.trackPlayingTime,
     period: state.period,
@@ -450,6 +540,8 @@ function buildServerGameRow(snapshot) {
     user_id: accountState.user.id,
     team_id: snapshot.team.id || null,
     team_name: snapshot.team.name,
+    opponent_name: snapshot.opponentName || null,
+    match_type: matchTypes.includes(snapshot.matchType) ? snapshot.matchType : "League",
     game_format: snapshot.gameFormat,
     status: snapshot.status,
     started_at: snapshot.createdAt,
@@ -551,6 +643,8 @@ function mergeGameArchives() {
       serverGameId: row.id,
       source: "server",
       status: row.status,
+      opponentName: payload.opponentName || row.opponent_name || "",
+      matchType: payload.matchType || row.match_type || "League",
       updatedAt: row.updated_at || payload.updatedAt,
       createdAt: row.created_at || payload.createdAt,
       finalizedAt: row.finalized_at || payload.finalizedAt
@@ -573,6 +667,8 @@ function saveGame() {
     halftimeStartedAt: state.halftimeStartedAt,
     gameFormat: state.gameFormat,
     trackPlayingTime: state.trackPlayingTime,
+    opponentName: state.opponentName,
+    matchType: state.matchType,
     roster: state.roster,
     presence: state.presence,
     startingLineup: state.startingLineup,
@@ -612,6 +708,8 @@ function loadGame() {
     state.halftimeStartedAt = Number(parsed.halftimeStartedAt) || 0;
     state.gameFormat = gameFormats[parsed.gameFormat] ? parsed.gameFormat : "11v11";
     state.trackPlayingTime = Boolean(parsed.trackPlayingTime);
+    state.opponentName = String(parsed.opponentName || "");
+    state.matchType = matchTypes.includes(parsed.matchType) ? parsed.matchType : "League";
     state.roster = normalizeRoster(parsed.roster);
     roster = state.roster;
     state.presence = normalizePresence(parsed.presence);
@@ -629,6 +727,12 @@ function loadGame() {
     state.serverGameId = parsed.serverGameId || null;
   } catch {
     window.localStorage.removeItem(STORAGE_KEY);
+  }
+}
+
+function syncGameMetaFromInputs() {
+  if (!setupSheet.classList.contains("hidden") && setupStep === (state.trackPlayingTime ? 3 : 2)) {
+    renderSetupReady();
   }
 }
 
@@ -807,6 +911,143 @@ async function loadPlayers(teamId) {
   return data || [];
 }
 
+async function loadObservationChoices() {
+  if (!isServerMode()) {
+    accountState.observationChoices = [];
+    applyObservationChoices([]);
+    return [];
+  }
+
+  const { data, error } = await supabaseClient
+    .from("observation_choices")
+    .select("*")
+    .order("target", { ascending: true })
+    .order("category", { ascending: true })
+    .order("sort_order", { ascending: true });
+
+  if (error) {
+    throw error;
+  }
+
+  accountState.observationChoices = data || [];
+
+  if (!accountState.observationChoices.length) {
+    await seedDefaultObservationChoices();
+    return loadObservationChoices();
+  }
+
+  applyObservationChoices(accountState.observationChoices);
+  return accountState.observationChoices;
+}
+
+async function seedDefaultObservationChoices() {
+  if (!isServerMode()) {
+    return;
+  }
+
+  const rows = observationChoiceDefaults.map((choice) => ({
+    user_id: accountState.user.id,
+    target: choice.target,
+    category: choice.category,
+    label: choice.label,
+    sort_order: choice.sort_order,
+    active: true
+  }));
+
+  const { error } = await supabaseClient
+    .from("observation_choices")
+    .insert(rows);
+
+  if (error) {
+    throw error;
+  }
+}
+
+async function saveObservationChoice(choice) {
+  if (!isServerMode()) {
+    throw new Error("Sign in before editing observations.");
+  }
+
+  const payload = {
+    user_id: accountState.user.id,
+    target: choice.target,
+    category: choice.category,
+    label: choice.label,
+    sort_order: Number(choice.sort_order) || 0,
+    active: choice.active !== false
+  };
+
+  if (choice.id) {
+    const { data, error } = await supabaseClient
+      .from("observation_choices")
+      .update(payload)
+      .eq("id", choice.id)
+      .select("*")
+      .single();
+    if (error) {
+      throw error;
+    }
+    return data;
+  }
+
+  const { data, error } = await supabaseClient
+    .from("observation_choices")
+    .insert(payload)
+    .select("*")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+}
+
+async function deactivateObservationChoice(choiceId) {
+  if (!isServerMode()) {
+    throw new Error("Sign in before editing observations.");
+  }
+
+  const { error } = await supabaseClient
+    .from("observation_choices")
+    .update({ active: false })
+    .eq("id", choiceId);
+
+  if (error) {
+    throw error;
+  }
+}
+
+async function moveObservationChoice(choiceId, direction) {
+  if (!isServerMode()) {
+    throw new Error("Sign in before editing observations.");
+  }
+
+  const activeChoices = accountState.observationChoices
+    .filter((choice) => choice.active !== false)
+    .sort((left, right) => (left.sort_order || 0) - (right.sort_order || 0) || left.label.localeCompare(right.label));
+  const choice = activeChoices.find((item) => item.id === choiceId);
+  if (!choice) {
+    return;
+  }
+
+  const group = activeChoices.filter((item) => item.target === choice.target && item.category === choice.category);
+  const index = group.findIndex((item) => item.id === choiceId);
+  const nextIndex = index + direction;
+  if (index < 0 || nextIndex < 0 || nextIndex >= group.length) {
+    return;
+  }
+
+  const swap = group[nextIndex];
+  const choiceOrder = choice.sort_order || 0;
+  const swapOrder = swap.sort_order || 0;
+
+  await Promise.all([
+    saveObservationChoice({ ...choice, sort_order: swapOrder }),
+    saveObservationChoice({ ...swap, sort_order: choiceOrder })
+  ]);
+}
+
 async function createTeam(team) {
   if (!isServerMode()) {
     throw new Error("Sign in before creating teams.");
@@ -962,6 +1203,7 @@ async function refreshAccountData() {
     accountState.profile = await ensureProfile(accountState.user);
     accountState.onboardingDismissed = Boolean(accountState.profile.onboarding_dismissed);
     accountState.teams = await loadTeams();
+    await loadObservationChoices();
     await Promise.all(accountState.teams.map((team) => loadPlayers(team.id)));
     await loadServerGames();
     const preferredTeamId = accountState.profile.selected_team_id;
@@ -980,8 +1222,10 @@ async function refreshAccountData() {
     accountState.loading = false;
     renderAccountStatus();
     renderTeamsSheet();
+    renderObservationsSheet();
     renderRosterSheet();
     showRoster();
+    maybeOpenOnboardingFlow();
   }
 }
 
@@ -1008,6 +1252,8 @@ async function initializeAccount() {
     accountState.teams = [];
     accountState.playersByTeam.clear();
     accountState.games = [];
+    accountState.observationChoices = [];
+    applyObservationChoices([]);
     accountState.selectedTeamId = null;
 
     if (accountState.user) {
@@ -1333,6 +1579,8 @@ function clearGameForNewSetup() {
   closeGoalFlow();
   closeSubSheet();
   closeGamesSheet();
+  closeObservationsSheet();
+  closeHelpSheet();
   closeTeamsSheet();
   closeAuthSheet();
   closeRosterSheet();
@@ -1474,21 +1722,23 @@ function renderAccountStatus() {
   const modeText = accountState.user
     ? `${email || "Signed in"} | ${teamText}`
     : "Local only | Sign in to save teams";
-  accountStrip.innerHTML = `
-    <div>
-      <p class="eyebrow">${accountState.loading ? "Syncing" : "Account"}</p>
-      <div class="undo-context">${escapeHtml(modeText)}</div>
-      ${accountState.message ? `<div class="account-message">${escapeHtml(accountState.message)}</div>` : ""}
-    </div>
-    <div class="account-actions">
-      <button class="undo-action" id="inlineAuthButton" type="button">${accountState.user ? "Account" : "Sign in"}</button>
-      <button class="undo-action" id="inlineTeamsButton" type="button">Teams</button>
-    </div>
-  `;
-
+  accountStatusLine.textContent = accountState.loading
+    ? `Syncing | ${modeText}`
+    : accountState.message
+      ? `${modeText} | ${accountState.message}`
+      : modeText;
   authButton.textContent = accountState.user ? "Account" : "Sign in";
-  teamsButton.classList.toggle("hidden", !accountState.user);
+  renderCurrentGameMeta();
   renderOnboardingNudge();
+}
+
+function renderCurrentGameMeta() {
+  const pieces = [
+    state.opponentName ? `vs ${state.opponentName}` : "No opponent set",
+    state.matchType || "League",
+    state.gameFormat
+  ];
+  currentGameMeta.textContent = pieces.join(" | ");
 }
 
 function renderOnboardingNudge() {
@@ -1510,11 +1760,39 @@ function renderOnboardingNudge() {
 
   if (!message) {
     onboardingStrip.classList.add("hidden");
+    if (accountState.profile && !accountState.profile.onboarding_completed) {
+      supabaseClient
+        .from("profiles")
+        .update({ onboarding_completed: true })
+        .eq("id", accountState.user.id)
+        .select("*")
+        .single()
+        .then(({ data }) => {
+          if (data) {
+            accountState.profile = data;
+          }
+        });
+    }
     return;
   }
 
   onboardingText.textContent = message;
   onboardingStrip.classList.remove("hidden");
+}
+
+function shouldShowOnboardingFlow() {
+  if (!accountState.user || accountState.onboardingDismissed) {
+    return false;
+  }
+
+  const selectedTeam = getSelectedTeam();
+  return !accountState.teams.length || !selectedTeam || selectedTeamPlayerCount() < 1;
+}
+
+function maybeOpenOnboardingFlow() {
+  if (shouldShowOnboardingFlow()) {
+    openTeamsSheet();
+  }
 }
 
 function openAuthSheet() {
@@ -1570,13 +1848,17 @@ function renderTeamsSheet() {
     teamsList.innerHTML = "";
     teamForm.classList.add("hidden");
     openTeamRoster.classList.add("hidden");
+    openObservationsFromTeams.classList.add("hidden");
     return;
   }
 
   teamForm.classList.remove("hidden");
   openTeamRoster.classList.toggle("hidden", !accountState.selectedTeamId);
+  openObservationsFromTeams.classList.remove("hidden");
   teamsStatus.textContent = accountState.teams.length
-    ? "Choose the active team or edit team details."
+    ? selectedTeamPlayerCount() < 1
+      ? "Add at least one roster player for the selected team. You can finish later."
+      : "Choose the active team or edit team details."
     : "Create your first team. You can add roster players next.";
 
   const selectedTeam = getSelectedTeam();
@@ -1585,6 +1867,16 @@ function renderTeamsSheet() {
   }
 
   teamsList.innerHTML = "";
+
+  const onboard = shouldShowOnboardingFlow();
+  if (onboard) {
+    const prompt = document.createElement("div");
+    prompt.className = "auth-status";
+    prompt.textContent = accountState.teams.length
+      ? "Next: use Edit selected roster to add at least one player. You can finish later."
+      : "Step 1: create your first team. You can finish later.";
+    teamsList.append(prompt);
+  }
 
   accountState.teams.forEach((team) => {
     const players = accountState.playersByTeam.get(team.id) || [];
@@ -1609,8 +1901,147 @@ function renderTeamsSheet() {
 
   if (!accountState.teams.length) {
     resetTeamForm();
-    teamsList.innerHTML = '<div class="goal-detail">No teams yet.</div>';
+    teamsList.insertAdjacentHTML("beforeend", '<div class="goal-detail">No teams yet.</div>');
   }
+}
+
+function openObservationsSheet() {
+  renderObservationsSheet();
+  observationsSheet.classList.remove("hidden");
+  observationsSheet.setAttribute("aria-hidden", "false");
+}
+
+function closeObservationsSheet() {
+  observationsSheet.classList.add("hidden");
+  observationsSheet.setAttribute("aria-hidden", "true");
+}
+
+function renderObservationsSheet() {
+  if (!observationChoiceList || !observationsStatus) {
+    return;
+  }
+
+  if (!accountState.user) {
+    observationsStatus.textContent = "Sign in to curate observation choices. Local mode uses the defaults.";
+    observationForm.classList.add("hidden");
+    observationChoiceList.innerHTML = "";
+    return;
+  }
+
+  observationForm.classList.remove("hidden");
+  observationsStatus.textContent = "User-wide choices apply to all teams.";
+  observationChoiceList.innerHTML = "";
+
+  const activeChoices = accountState.observationChoices
+    .filter((choice) => choice.active !== false)
+    .sort((left, right) => left.target.localeCompare(right.target) || left.category.localeCompare(right.category) || (left.sort_order || 0) - (right.sort_order || 0));
+
+  if (!activeChoices.length) {
+    observationChoiceList.innerHTML = '<div class="goal-detail">No choices yet. Defaults will be restored after sign-in sync.</div>';
+    return;
+  }
+
+  activeChoices.forEach((choice) => {
+    const row = document.createElement("article");
+    row.className = "observation-choice-row";
+    row.innerHTML = `
+      <div>
+        <div class="stat-name">${escapeHtml(choice.label)}</div>
+        <div class="goal-detail">${escapeHtml(choice.target)} | ${escapeHtml(choice.category)}</div>
+      </div>
+      <div class="roster-toggles">
+        <button class="toggle-pill" data-observation-action="up" data-choice-id="${escapeHtml(choice.id)}" type="button">Up</button>
+        <button class="toggle-pill" data-observation-action="down" data-choice-id="${escapeHtml(choice.id)}" type="button">Down</button>
+        <button class="toggle-pill" data-observation-action="edit" data-choice-id="${escapeHtml(choice.id)}" type="button">Edit</button>
+        <button class="toggle-pill danger-toggle" data-observation-action="remove" data-choice-id="${escapeHtml(choice.id)}" type="button">Remove</button>
+      </div>
+    `;
+    observationChoiceList.append(row);
+  });
+}
+
+function resetObservationForm(choice = null) {
+  observationForm.dataset.choiceId = choice ? choice.id : "";
+  observationTarget.value = choice ? choice.target : "player";
+  observationCategory.value = choice ? choice.category : "positive";
+  observationLabel.value = choice ? choice.label : "";
+  saveObservationChoiceButton.textContent = choice ? "Update observation" : "Add observation";
+}
+
+async function saveObservationChoiceFromForm() {
+  const label = observationLabel.value.trim();
+  if (!label) {
+    observationsStatus.textContent = "Observation label is required.";
+    return;
+  }
+
+  const existing = accountState.observationChoices.find((choice) => choice.id === observationForm.dataset.choiceId);
+  const sortBase = accountState.observationChoices.filter((choice) => (
+    choice.target === observationTarget.value && choice.category === observationCategory.value
+  )).length;
+
+  try {
+    await saveObservationChoice({
+      id: existing ? existing.id : null,
+      target: observationTarget.value,
+      category: observationCategory.value,
+      label,
+      sort_order: existing ? existing.sort_order : sortBase,
+      active: true
+    });
+    await loadObservationChoices();
+    resetObservationForm();
+    renderObservationsSheet();
+    showRoster();
+    saveGame();
+  } catch (error) {
+    observationsStatus.textContent = error.message || "Could not save observation.";
+  }
+}
+
+async function handleObservationChoiceAction(button) {
+  const choice = accountState.observationChoices.find((item) => item.id === button.dataset.choiceId);
+  if (!choice) {
+    return;
+  }
+
+  if (button.dataset.observationAction === "edit") {
+    resetObservationForm(choice);
+    return;
+  }
+
+  if (button.dataset.observationAction === "up" || button.dataset.observationAction === "down") {
+    try {
+      await moveObservationChoice(choice.id, button.dataset.observationAction === "up" ? -1 : 1);
+      await loadObservationChoices();
+      renderObservationsSheet();
+      showRoster();
+      saveGame();
+    } catch (error) {
+      observationsStatus.textContent = error.message || "Could not reorder observation.";
+    }
+    return;
+  }
+
+  try {
+    await deactivateObservationChoice(choice.id);
+    await loadObservationChoices();
+    renderObservationsSheet();
+    showRoster();
+    saveGame();
+  } catch (error) {
+    observationsStatus.textContent = error.message || "Could not remove observation.";
+  }
+}
+
+function openHelpSheet() {
+  helpSheet.classList.remove("hidden");
+  helpSheet.setAttribute("aria-hidden", "false");
+}
+
+function closeHelpSheet() {
+  helpSheet.classList.add("hidden");
+  helpSheet.setAttribute("aria-hidden", "true");
 }
 
 function formatGameDate(value) {
@@ -1629,7 +2060,8 @@ function formatGameDate(value) {
 function gameSummaryLine(game) {
   const score = game.score || { us: 0, them: 0 };
   const teamName = game.team && game.team.name ? game.team.name : game.team_name || "Game";
-  return `${teamName} | ${score.us}-${score.them} | ${game.entries ? game.entries.length : game.observation_count || 0} observations`;
+  const opponent = game.opponentName ? ` vs ${game.opponentName}` : "";
+  return `${teamName}${opponent} | ${game.matchType || "League"} | ${score.us}-${score.them} | ${game.entries ? game.entries.length : game.observation_count || 0} observations`;
 }
 
 function buildGameLogTextFromSnapshot(game) {
@@ -1644,6 +2076,8 @@ function buildGameLogTextFromSnapshot(game) {
     "Game Log",
     "",
     `Team: ${game.team && game.team.name ? game.team.name : "Local roster"}`,
+    `Opponent: ${game.opponentName || "Not set"}`,
+    `Type: ${game.matchType || "League"}`,
     `Clock: ${formatClock(game.elapsedMs || 0)}`,
     `Format: ${game.gameFormat || "11v11"}`,
     `Score: ${score.us}-${score.them}`,
@@ -1776,7 +2210,7 @@ function renderGameDetail(game) {
       <span>${escapeHtml(game.team && game.team.name ? game.team.name : "Game")}</span>
       <span>${score.us}-${score.them}</span>
     </div>
-    <div class="goal-detail">${escapeHtml(formatGameDate(game.createdAt))} | ${escapeHtml(game.gameFormat || "11v11")} | ${escapeHtml(game.status || "in_progress")}</div>
+    <div class="goal-detail">${escapeHtml(formatGameDate(game.createdAt))} | ${escapeHtml(game.opponentName ? `vs ${game.opponentName}` : "No opponent")} | ${escapeHtml(game.matchType || "League")} | ${escapeHtml(game.gameFormat || "11v11")} | ${escapeHtml(game.status || "in_progress")}</div>
     <div class="summary-strip">
       <span class="summary-pill">${(game.entries || []).length} observations</span>
       <span class="summary-pill">${(game.goals || []).length} goals</span>
@@ -1825,6 +2259,8 @@ function loadArchivedGameIntoState(game) {
   state.halftimeStartedAt = 0;
   state.gameFormat = gameFormats[game.gameFormat] ? game.gameFormat : "11v11";
   state.trackPlayingTime = Boolean(game.trackPlayingTime);
+  state.opponentName = game.opponentName || "";
+  state.matchType = matchTypes.includes(game.matchType) ? game.matchType : "League";
   roster = normalizeRoster(game.roster || defaultRoster);
   state.roster = roster;
   state.presence = normalizePresence(game.presence || {});
@@ -1890,6 +2326,10 @@ async function saveTeamFromForm() {
     await setSelectedTeam(saved.id);
     resetTeamForm(saved);
     setAccountMessage(`Saved ${saved.name}.`);
+    if (shouldShowOnboardingFlow() && selectedTeamPlayerCount() < 1) {
+      closeTeamsSheet();
+      openRosterSheet();
+    }
   } catch (error) {
     teamsStatus.textContent = error.message || "Could not save team.";
   }
@@ -2271,12 +2711,15 @@ function commitStagedSubs() {
 
 function openSetupSheet() {
   setupStep = 0;
+  opponentName.value = "";
+  matchType.value = "League";
   renderSetupStep();
   setupSheet.classList.remove("hidden");
   setupSheet.setAttribute("aria-hidden", "false");
 }
 
 function closeSetupSheet() {
+  gameMetaForm.classList.add("hidden");
   setupSheet.classList.add("hidden");
   setupSheet.setAttribute("aria-hidden", "true");
 }
@@ -2295,6 +2738,7 @@ function renderSetupStep() {
   setupBack.classList.toggle("hidden", setupStep === 0);
   setupNext.classList.toggle("hidden", setupStep === totalSteps - 1);
   setupStart.classList.toggle("hidden", setupStep !== totalSteps - 1);
+  gameMetaForm.classList.toggle("hidden", setupStep !== 0);
   setupNext.disabled = state.trackPlayingTime && setupStep === 2 && starterCount !== requiredStarters;
   setupNext.classList.toggle("disabled-action", setupNext.disabled);
   setupStart.disabled = state.trackPlayingTime && starterCount !== requiredStarters;
@@ -2303,7 +2747,7 @@ function renderSetupStep() {
   if (setupStep === 0) {
     setupStepLabel.textContent = `Step 1 of ${totalSteps}`;
     setupTitle.textContent = "Choose game format";
-    setupCopy.textContent = "Pick player count and whether substitutions/playing time should be tracked.";
+    setupCopy.textContent = "Add opponent, type, player count, and whether substitutions/playing time should be tracked.";
     renderSetupFormat();
   } else if (setupStep === 1) {
     setupStepLabel.textContent = `Step 2 of ${totalSteps}`;
@@ -2420,11 +2864,15 @@ function renderSetupStarters() {
 function renderSetupReady() {
   const requiredStarters = gameFormats[state.gameFormat] || 11;
   const starterCount = state.startingLineup.filter((id) => isPresent(id)).length;
+  const draftOpponent = opponentName.value.trim();
+  const draftMatchType = matchTypes.includes(matchType.value) ? matchType.value : "League";
   setupBody.innerHTML = `
     <div class="ready-panel">
       <div class="ready-pill">${getPresentRoster().length} present</div>
       <div class="ready-pill">${state.gameFormat}</div>
       <div class="ready-pill">${state.trackPlayingTime ? `${starterCount}/${requiredStarters} starters` : "Observation only"}</div>
+      <div class="ready-pill">${draftOpponent ? `vs ${escapeHtml(draftOpponent)}` : "No opponent"}</div>
+      <div class="ready-pill">${draftMatchType}</div>
       <div class="ready-pill">Clock waiting</div>
     </div>
   `;
@@ -2435,11 +2883,15 @@ function finishSetup() {
   const startingLineup = [...state.startingLineup];
   const gameFormat = state.gameFormat;
   const trackPlayingTime = state.trackPlayingTime;
+  const opponent = opponentName.value.trim();
+  const type = matchTypes.includes(matchType.value) ? matchType.value : "League";
   clearGameForNewSetup();
   state.presence = presence;
   state.startingLineup = startingLineup;
   state.gameFormat = gameFormat;
   state.trackPlayingTime = trackPlayingTime;
+  state.opponentName = opponent;
+  state.matchType = type;
   if (state.trackPlayingTime) {
     ensureLineupReady();
     if (!state.initialOnField.length) {
@@ -2733,6 +3185,8 @@ function renderTally() {
 
   summaryStrip.innerHTML = `
     <span class="summary-pill">Clock ${formatClock(getElapsedMs())}</span>
+    <span class="summary-pill">${state.opponentName ? `vs ${escapeHtml(state.opponentName)}` : "No opponent"}</span>
+    <span class="summary-pill">${escapeHtml(state.matchType)}</span>
     <span class="summary-pill">Score ${score.us}-${score.them}</span>
     <span class="summary-pill">${state.gameFormat}</span>
     ${lineupSummary}
@@ -2750,7 +3204,7 @@ function renderTally() {
   const teamChips = Object.entries(teamStats.byObservation)
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([label, count]) => {
-      const category = teamObservations.positive.includes(label) ? "positive" : "negative";
+      const category = teamStats.entries.find((entry) => entry.observation === label)?.category || getObservationCategory("team", label);
       return `<span class="breakdown-chip ${category}">${label}: ${count}</span>`;
     })
     .join("");
@@ -2772,7 +3226,7 @@ function renderTally() {
     const chips = Object.entries(stats.byObservation)
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([label, count]) => {
-        const category = observations.positive.includes(label) ? "positive" : "negative";
+        const category = stats.entries.find((entry) => entry.observation === label)?.category || getObservationCategory("player", label);
         return `<span class="breakdown-chip ${category}">${label}: ${count}</span>`;
       })
       .join("");
@@ -2868,6 +3322,8 @@ function buildGameLogEmailBody() {
   const lines = [
     "Game Log",
     "",
+    `Opponent: ${state.opponentName || "Not set"}`,
+    `Type: ${state.matchType || "League"}`,
     `Clock: ${formatClock(getElapsedMs())}`,
     `Format: ${state.gameFormat}`,
     `Score: ${score.us}-${score.them}`,
@@ -3003,11 +3459,14 @@ undoLast.addEventListener("click", undoLastObservation);
 installButton.addEventListener("click", promptInstallApp);
 authButton.addEventListener("click", openAuthSheet);
 teamsButton.addEventListener("click", openTeamsSheet);
+helpButton.addEventListener("click", openHelpSheet);
 newGameButton.addEventListener("click", openSetupSheet);
 rosterButton.addEventListener("click", openRosterSheet);
 closeRoster.addEventListener("click", closeRosterSheet);
 closeAuth.addEventListener("click", closeAuthSheet);
 closeTeams.addEventListener("click", closeTeamsSheet);
+closeObservations.addEventListener("click", closeObservationsSheet);
+closeHelp.addEventListener("click", closeHelpSheet);
 subsButton.addEventListener("click", openSubSheet);
 closeSubs.addEventListener("click", closeSubSheet);
 subsMadeButton.addEventListener("click", commitStagedSubs);
@@ -3044,17 +3503,6 @@ setupNext.addEventListener("click", () => {
   renderSetupStep();
 });
 setupStart.addEventListener("click", finishSetup);
-
-accountStrip.addEventListener("click", (event) => {
-  const authTarget = event.target.closest("#inlineAuthButton");
-  const teamsTarget = event.target.closest("#inlineTeamsButton");
-
-  if (authTarget) {
-    openAuthSheet();
-  } else if (teamsTarget) {
-    openTeamsSheet();
-  }
-});
 
 onboardingAction.addEventListener("click", openTeamsSheet);
 onboardingLater.addEventListener("click", () => {
@@ -3097,6 +3545,28 @@ teamForm.addEventListener("submit", (event) => {
   saveTeamFromForm();
 });
 
+observationForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  saveObservationChoiceFromForm();
+});
+
+observationChoiceList.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-observation-action]");
+  if (!button) {
+    return;
+  }
+
+  handleObservationChoiceAction(button);
+});
+
+openObservationsFromHelp.addEventListener("click", () => {
+  closeHelpSheet();
+  openObservationsSheet();
+});
+
+opponentName.addEventListener("change", syncGameMetaFromInputs);
+matchType.addEventListener("change", syncGameMetaFromInputs);
+
 gamesList.addEventListener("click", (event) => {
   const button = event.target.closest("[data-game-id]");
   if (!button) {
@@ -3131,6 +3601,11 @@ teamsList.addEventListener("click", (event) => {
 openTeamRoster.addEventListener("click", () => {
   closeTeamsSheet();
   openRosterSheet();
+});
+
+openObservationsFromTeams.addEventListener("click", () => {
+  closeTeamsSheet();
+  openObservationsSheet();
 });
 
 setupBody.addEventListener("click", (event) => {
@@ -3233,6 +3708,18 @@ teamsSheet.addEventListener("click", (event) => {
   }
 });
 
+observationsSheet.addEventListener("click", (event) => {
+  if (event.target === observationsSheet) {
+    closeObservationsSheet();
+  }
+});
+
+helpSheet.addEventListener("click", (event) => {
+  if (event.target === helpSheet) {
+    closeHelpSheet();
+  }
+});
+
 gamesSheet.addEventListener("click", (event) => {
   if (event.target === gamesSheet) {
     closeGamesSheet();
@@ -3285,6 +3772,16 @@ document.addEventListener("keydown", (event) => {
       return;
     }
 
+    if (!observationsSheet.classList.contains("hidden")) {
+      closeObservationsSheet();
+      return;
+    }
+
+    if (!helpSheet.classList.contains("hidden")) {
+      closeHelpSheet();
+      return;
+    }
+
     if (!authSheet.classList.contains("hidden")) {
       closeAuthSheet();
       return;
@@ -3323,6 +3820,7 @@ loadGame();
 ensureCurrentGameIdentity();
 renderObservationButtons();
 renderAccountStatus();
+renderCurrentGameMeta();
 showRoster();
 renderSubStrip();
 renderClock();

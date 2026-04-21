@@ -19,23 +19,17 @@
         <div>
           <p class="eyebrow">RTSC observation tracker</p>
           <h1>Game Tracker</h1>
+          <div class="account-status-line" id="accountStatusLine">Local only</div>
         </div>
         <div class="header-actions">
           <button class="quiet-button" id="authButton" type="button">Account</button>
           <button class="quiet-button" id="teamsButton" type="button">Teams</button>
           <button class="quiet-button hidden" id="installButton" type="button">Install</button>
           <button class="quiet-button" id="newGameButton" type="button">New Game</button>
-          <button class="quiet-button" id="rosterButton" type="button">Roster</button>
-          <button class="quiet-button" id="subsButton" type="button">Subs</button>
-          <button class="quiet-button" id="goalButton" type="button">Goal</button>
           <button class="quiet-button" id="gameLogButton" type="button">Logs</button>
-          <button class="icon-button" id="tallyButton" type="button" aria-label="Open tally">
-            <span aria-hidden="true">#</span>
-          </button>
+          <button class="quiet-button" id="helpButton" type="button">Help</button>
         </div>
       </header>
-
-      <section class="account-strip" id="accountStrip" aria-live="polite"></section>
 
       <section class="onboarding-strip hidden" id="onboardingStrip" aria-live="polite">
         <div>
@@ -60,6 +54,19 @@
           <button class="secondary-action hidden" id="halftimeButton" type="button">Halftime</button>
           <button class="secondary-action hidden" id="finalWhistleButton" type="button">Final Whistle</button>
           <button class="reset-link" id="resetClock" type="button">Reset</button>
+        </div>
+      </section>
+
+      <section class="current-game-strip" aria-label="Current game actions">
+        <div>
+          <p class="eyebrow">Current game</p>
+          <div class="current-game-meta" id="currentGameMeta">No opponent set</div>
+        </div>
+        <div class="current-game-actions">
+          <button class="quiet-button" id="rosterButton" type="button">Roster</button>
+          <button class="quiet-button hidden" id="subsButton" type="button">Subs</button>
+          <button class="quiet-button" id="goalButton" type="button">Goal</button>
+          <button class="quiet-button" id="tallyButton" type="button">Tally</button>
         </div>
       </section>
 
@@ -165,6 +172,68 @@
         </form>
         <div class="teams-list" id="teamsList"></div>
         <button class="secondary-action wide-action" id="openTeamRoster" type="button">Edit selected roster</button>
+        <button class="text-button wide-action" id="openObservationsFromTeams" type="button">Manage observations</button>
+      </div>
+    </aside>
+
+    <aside class="observations-sheet hidden" id="observationsSheet" aria-hidden="true">
+      <div class="observations-card" role="dialog" aria-modal="true" aria-labelledby="observationsTitle">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Settings</p>
+            <h2 id="observationsTitle">Observations</h2>
+          </div>
+          <button class="icon-button" id="closeObservations" type="button" aria-label="Close observations">
+            <span aria-hidden="true">x</span>
+          </button>
+        </div>
+        <div class="auth-status" id="observationsStatus"></div>
+        <form class="observation-edit-form" id="observationForm">
+          <select id="observationTarget" aria-label="Observation target">
+            <option value="player">Player</option>
+            <option value="team">Team</option>
+          </select>
+          <select id="observationCategory" aria-label="Observation category">
+            <option value="positive">Positive</option>
+            <option value="negative">Negative</option>
+          </select>
+          <input id="observationLabel" type="text" autocomplete="off" placeholder="Observation label" aria-label="Observation label">
+          <button class="primary-action" id="saveObservationChoice" type="submit">Add observation</button>
+        </form>
+        <div class="observation-choice-list" id="observationChoiceList"></div>
+      </div>
+    </aside>
+
+    <aside class="help-sheet hidden" id="helpSheet" aria-hidden="true">
+      <div class="help-card" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Help</p>
+            <h2 id="helpTitle">Using Game Tracker</h2>
+          </div>
+          <button class="icon-button" id="closeHelp" type="button" aria-label="Close help">
+            <span aria-hidden="true">x</span>
+          </button>
+        </div>
+        <div class="help-content">
+          <section>
+            <h3>Intent</h3>
+            <p>Track fast sideline observations, goals, subs, and game logs without slowing down coaching.</p>
+          </section>
+          <section>
+            <h3>Initial Setup</h3>
+            <p>Sign in, create a team, add roster players, and optionally curate the observation choices coaches will see during games.</p>
+          </section>
+          <section>
+            <h3>Game Workflow</h3>
+            <p>Use New Game to set opponent, type, format, attendance, and starters. Current-game actions live by the clock for goals, subs, roster, and tally.</p>
+          </section>
+          <section>
+            <h3>Logs</h3>
+            <p>Logs save locally as you track. When signed in, game logs sync to Supabase and can be copied, loaded, or deleted from Logs.</p>
+          </section>
+        </div>
+        <button class="secondary-action wide-action" id="openObservationsFromHelp" type="button">Manage Observations</button>
       </div>
     </aside>
 
@@ -258,6 +327,15 @@
         </div>
         <div class="setup-progress" id="setupProgress"></div>
         <p class="reset-copy" id="setupCopy"></p>
+        <form class="game-meta-form hidden" id="gameMetaForm">
+          <input id="opponentName" type="text" autocomplete="off" placeholder="Opponent" aria-label="Opponent">
+          <select id="matchType" aria-label="Game type">
+            <option value="League">League</option>
+            <option value="Tournament">Tournament</option>
+            <option value="Cup">Cup</option>
+            <option value="Friendly">Friendly</option>
+          </select>
+        </form>
         <div class="setup-body" id="setupBody"></div>
         <div class="setup-actions">
           <button class="text-button hidden" id="setupBack" type="button">Back</button>
